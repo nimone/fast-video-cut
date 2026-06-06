@@ -1,0 +1,171 @@
+// src/keymap/keys.ts
+// Registers global tinykeys bindings and dispatches them to store/player actions.
+
+import { tinykeys } from 'tinykeys';
+import type { Player } from '../media/player';
+import { useEditStore } from '../store/edit-store';
+import { useKeymapStore } from '../store/keymap-store';
+
+const SPEED_CYCLE = [0.25, 0.5, 1, 1.5, 2];
+
+interface KeymapDeps {
+  getEditStore: () => ReturnType<typeof useEditStore.getState>;
+  getKeymapStore: () => ReturnType<typeof useKeymapStore.getState>;
+  getPlayer: () => Player | null;
+  openFile: () => void;
+  openExport: () => void;
+  toggleCheatsheet: () => void;
+}
+
+export function registerKeymap(deps: KeymapDeps): () => void {
+  const {
+    getEditStore,
+    getKeymapStore,
+    getPlayer,
+    openFile,
+    openExport,
+    toggleCheatsheet,
+  } = deps;
+
+  const actions: Record<string, (e: KeyboardEvent) => void> = {
+    playPause(e) {
+      e.preventDefault();
+      getPlayer()?.togglePlayPause();
+    },
+    cutAtCursor(e) {
+      e.preventDefault();
+      getEditStore().cutAtCursor();
+    },
+    trimLeft(e) {
+      e.preventDefault();
+      getEditStore().trimLeft();
+    },
+    trimRight(e) {
+      e.preventDefault();
+      getEditStore().trimRight();
+    },
+    deleteSelection(e) {
+      e.preventDefault();
+      getEditStore().deleteSelection();
+    },
+    frameStepBack(e) {
+      e.preventDefault();
+      const { fps } = getEditStore();
+      void getPlayer()?.frameStep(-1, fps);
+    },
+    frameStepForward(e) {
+      e.preventDefault();
+      const { fps } = getEditStore();
+      void getPlayer()?.frameStep(1, fps);
+    },
+    bigJumpBack(e) {
+      e.preventDefault();
+      const p = getPlayer();
+      if (p) void p.seekTo(p.currentTime - 5);
+    },
+    bigJumpForward(e) {
+      e.preventDefault();
+      const p = getPlayer();
+      if (p) void p.seekTo(p.currentTime + 5);
+    },
+    prevCut(e) {
+      e.preventDefault();
+      const { segments, currentTime, setCurrentTime } = getEditStore();
+      const p = getPlayer();
+      // Find all cut boundaries
+      const boundaries = [
+        ...new Set(segments.flatMap((s) => [s.start, s.end])),
+      ].sort((a, b) => a - b);
+      const prev = boundaries
+        .filter((t) => t < currentTime - 0.05)
+        .at(-1);
+      if (prev !== undefined) {
+        setCurrentTime(prev);
+        void p?.seekTo(prev);
+      }
+    },
+    nextCut(e) {
+      e.preventDefault();
+      const { segments, currentTime, setCurrentTime } = getEditStore();
+      const p = getPlayer();
+      const boundaries = [
+        ...new Set(segments.flatMap((s) => [s.start, s.end])),
+      ].sort((a, b) => a - b);
+      const next = boundaries.find((t) => t > currentTime + 0.05);
+      if (next !== undefined) {
+        setCurrentTime(next);
+        void p?.seekTo(next);
+      }
+    },
+    zoomIn(e) {
+      e.preventDefault();
+      // Timeline zoom handled via event
+      window.dispatchEvent(new CustomEvent('timeline:zoomIn'));
+    },
+    zoomOut(e) {
+      e.preventDefault();
+      window.dispatchEvent(new CustomEvent('timeline:zoomOut'));
+    },
+    speedDown(e) {
+      e.preventDefault();
+      const p = getPlayer();
+      if (!p) return;
+      const idx = SPEED_CYCLE.findIndex((s) => s >= p.speed);
+      const nextIdx = Math.max(0, idx - 1);
+      p.setSpeed(SPEED_CYCLE[nextIdx]);
+    },
+    speedUp(e) {
+      e.preventDefault();
+      const p = getPlayer();
+      if (!p) return;
+      const idx = SPEED_CYCLE.findIndex((s) => s >= p.speed);
+      const nextIdx = Math.min(SPEED_CYCLE.length - 1, idx + 1);
+      p.setSpeed(SPEED_CYCLE[nextIdx]);
+    },
+    undo(e) {
+      e.preventDefault();
+      getEditStore().undo();
+    },
+    redo(e) {
+      e.preventDefault();
+      getEditStore().redo();
+    },
+    export(e) {
+      e.preventDefault();
+      openExport();
+    },
+    openFile(e) {
+      e.preventDefault();
+      openFile();
+    },
+    showCheatsheet(e) {
+      e.preventDefault();
+      toggleCheatsheet();
+    },
+  };
+
+  // Build the tinykeys map from current bindings
+  const rebuild = () => {
+    const { bindings } = getKeymapStore();
+    const keyMap: Record<string, (e: KeyboardEvent) => void> = {};
+    for (const [action, key] of Object.entries(bindings)) {
+      if (actions[action]) {
+        keyMap[key] = actions[action];
+      }
+    }
+    return keyMap;
+  };
+
+  let unsubscribe = tinykeys(window, rebuild());
+
+  // Re-register whenever bindings change
+  const unsubscribeStore = useKeymapStore.subscribe(() => {
+    unsubscribe();
+    unsubscribe = tinykeys(window, rebuild());
+  });
+
+  return () => {
+    unsubscribe();
+    unsubscribeStore();
+  };
+}

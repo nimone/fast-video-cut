@@ -2,7 +2,7 @@
 // React wrapper for the canvas timeline.
 
 import { useRef, useEffect, useCallback, useState } from 'react';
-import { drawTimeline } from './timeline-draw';
+import { drawTimeline, stToVt, vtToSt } from './timeline-draw';
 import { attachTimelineInput } from './timeline-input';
 import { useEditStore } from '../../store/edit-store';
 import type { Player } from '../../media/player';
@@ -23,21 +23,33 @@ export function Timeline({ player, className = '' }: TimelineProps) {
   const seekRafRef = useRef<number | null>(null);
   const pendingSeekRef = useRef<number | null>(null);
 
-  const { segments, keyframeTimes, currentTime, duration, selectionStart, selectionEnd, setCurrentTime, setSelection } =
-    useEditStore();
+  const {
+    segments,
+    keyframeTimes,
+    currentTime,
+    duration,
+    selectionStart,
+    selectionEnd,
+    selectedSegmentIndex,
+    setCurrentTime,
+    setSelection,
+    setSelectedSegmentIndex,
+  } = useEditStore();
 
-  // Initialize view to full duration when duration changes
+  const totalDuration = segments.reduce((acc, s) => acc + (s.end - s.start), 0) || duration;
+
+  // Initialize view to full virtual duration when totalDuration changes
   useEffect(() => {
-    if (duration > 0) {
+    if (totalDuration > 0) {
       setViewStart(0);
-      setViewEnd(duration);
+      setViewEnd(totalDuration);
     }
-  }, [duration]);
+  }, [totalDuration]);
 
-  // Draw loop
+  // Draw loop for the timeline canvas (non-preview)
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
-    if (!canvas || duration === 0) return;
+    if (!canvas || totalDuration === 0) return;
 
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas.getBoundingClientRect();
@@ -46,19 +58,24 @@ export function Timeline({ player, className = '' }: TimelineProps) {
       canvas.height = rect.height * dpr;
     }
 
+    const virtualCurrentTime = stToVt(currentTime, segments);
+    const virtualSelectionStart = selectionStart !== null ? stToVt(selectionStart, segments) : null;
+    const virtualSelectionEnd = selectionEnd !== null ? stToVt(selectionEnd, segments) : null;
+
     drawTimeline({
       canvas,
-      duration,
+      duration: totalDuration,
       segments,
       keyframeTimes,
-      currentTime,
+      currentTime: virtualCurrentTime,
       hoverTime,
-      selectionStart,
-      selectionEnd,
+      selectionStart: virtualSelectionStart,
+      selectionEnd: virtualSelectionEnd,
+      selectedSegmentIndex,
       viewStart: viewStart || 0,
-      viewEnd: viewEnd || duration,
+      viewEnd: viewEnd || totalDuration,
     });
-  }, [segments, keyframeTimes, currentTime, hoverTime, selectionStart, selectionEnd, viewStart, viewEnd, duration]);
+  }, [segments, keyframeTimes, currentTime, hoverTime, selectionStart, selectionEnd, selectedSegmentIndex, viewStart, viewEnd, totalDuration]);
 
   // rAF render loop — canvas only, no media decoding here
   useEffect(() => {
@@ -89,7 +106,7 @@ export function Timeline({ player, className = '' }: TimelineProps) {
   // Attach input handlers
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas || duration === 0) return;
+    if (!canvas || totalDuration === 0) return;
 
     const cleanup = attachTimelineInput({
       canvas,
@@ -98,18 +115,44 @@ export function Timeline({ player, className = '' }: TimelineProps) {
         setViewStart(s);
         setViewEnd(e);
       },
-      getDuration: () => duration,
-      onHover: (time) => {
-        // Only update the visual indicator — do NOT seek on every mousemove
-        setHoverTime(time);
+      getDuration: () => totalDuration,
+      onHover: (vt, isDragging) => {
+        // Update the visual indicator and trigger hover preview on main player
+        setHoverTime(vt);
+        if (player) {
+          if (vt !== null && !isDragging) {
+            const st = vtToSt(vt, segments);
+            void player.showHoverPreview(st);
+          } else {
+            void player.clearHoverPreview();
+          }
+        }
       },
-      onSeek: (time) => {
+      onSeek: (vt) => {
         // Called on mousedown and drag — throttle to one decode per rAF
-        setCurrentTime(time);
-        throttledSeek(time);
+        const st = vtToSt(vt, segments);
+        setCurrentTime(st);
+        throttledSeek(st);
+
+        // Find which segment index contains vt
+        let accum = 0;
+        let clickedIdx = -1;
+        for (let i = 0; i < segments.length; i++) {
+          const dur = segments[i].end - segments[i].start;
+          if (vt >= accum && vt <= accum + dur) {
+            clickedIdx = i;
+            break;
+          }
+          accum += dur;
+        }
+        if (clickedIdx !== -1) {
+          setSelectedSegmentIndex(clickedIdx);
+        }
       },
-      onSelectionChange: (start, end) => {
-        setSelection(start, end);
+      onSelectionChange: (vStart, vEnd) => {
+        const sStart = vStart !== null ? vtToSt(vStart, segments) : null;
+        const sEnd = vEnd !== null ? vtToSt(vEnd, segments) : null;
+        setSelection(sStart, sEnd);
       },
     });
 
@@ -122,7 +165,7 @@ export function Timeline({ player, className = '' }: TimelineProps) {
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player, duration, viewStart, viewEnd, throttledSeek]);
+  }, [player, duration, totalDuration, segments, viewStart, viewEnd, throttledSeek]);
 
   return (
     <div className={`relative w-full ${className}`} style={{ cursor: 'crosshair' }}>

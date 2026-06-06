@@ -6,7 +6,7 @@ export interface TimelineInputOptions {
   getViewRange: () => { viewStart: number; viewEnd: number };
   setViewRange: (start: number, end: number) => void;
   getDuration: () => number;
-  onHover: (time: number | null) => void;
+  onHover: (time: number | null, isDragging: boolean) => void;
   onSeek: (time: number) => void;
   onSelectionChange: (start: number | null, end: number | null) => void;
 }
@@ -35,7 +35,7 @@ export function attachTimelineInput(opts: TimelineInputOptions): () => void {
 
   function onMouseMove(e: MouseEvent) {
     const time = Math.max(0, Math.min(getDuration(), xToTime(e.clientX)));
-    onHover(time);
+    onHover(time, isDragging);
 
     if (isDragging && dragMode === 'seek') {
       onSeek(time);
@@ -45,7 +45,7 @@ export function attachTimelineInput(opts: TimelineInputOptions): () => void {
   }
 
   function onMouseLeave() {
-    onHover(null);
+    onHover(null, false);
   }
 
   function onMouseDown(e: MouseEvent) {

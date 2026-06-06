@@ -9,6 +9,7 @@ import { useEditStore } from '../../store/edit-store';
 import type { Player as PlayerEngine } from '../../media/player';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { stToVt } from '../timeline/timeline-draw';
 
 interface PlayerProps {
   player: PlayerEngine | null;
@@ -27,7 +28,7 @@ export function PlayerPanel({ player }: PlayerProps) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
 
-  const { currentTime, duration, fps, setCurrentTime } = useEditStore();
+  const { currentTime, duration, fps, setCurrentTime, segments } = useEditStore();
 
   // Render incoming frames to canvas
   useEffect(() => {
@@ -72,7 +73,9 @@ export function PlayerPanel({ player }: PlayerProps) {
     [player]
   );
 
-  const progressFrac = duration > 0 ? currentTime / duration : 0;
+  const totalDuration = segments.reduce((acc, s) => acc + (s.end - s.start), 0) || duration;
+  const virtualCurrentTime = stToVt(currentTime, segments);
+  const progressFrac = totalDuration > 0 ? virtualCurrentTime / totalDuration : 0;
 
   return (
     <div className="flex flex-col h-full bg-card rounded-xl overflow-hidden border border-border">
@@ -111,11 +114,11 @@ export function PlayerPanel({ player }: PlayerProps) {
       <div className="flex items-center gap-2 px-4 py-2 bg-muted/32 border-t border-border">
         {/* Time */}
         <span className="font-mono text-xs text-foreground/60 min-w-[90px]">
-          {formatTime(currentTime)}
+          {formatTime(virtualCurrentTime)}
         </span>
         <span className="text-muted-foreground/30 text-xs">/</span>
         <span className="font-mono text-xs text-muted-foreground/55 min-w-[90px]">
-          {formatTime(duration)}
+          {formatTime(totalDuration)}
         </span>
 
         <div className="flex-1" />

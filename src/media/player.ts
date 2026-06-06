@@ -7,7 +7,9 @@ import {
   type InputVideoTrack,
   type InputAudioTrack,
   type Input,
+  type WrappedCanvas,
 } from 'mediabunny';
+import { useEditStore } from '../store/edit-store';
 
 export interface PlayerState {
   currentTime: number;
@@ -44,6 +46,8 @@ export class Player {
   // Seek debounce — only one seek in flight at a time
   private seekInFlight = false;
   private pendingSeekTime: number | null = null;
+  private _hoverTime: number | null = null;
+  private playbackSeekTime: number | null = null;
 
   private listeners: PlayerListeners = {
     timeupdate: [],
@@ -87,6 +91,7 @@ export class Player {
   get playing() { return this._playing; }
   get speed() { return this._speed; }
   get duration() { return this._duration; }
+  get hoverTime() { return this._hoverTime; }
 
   /**
    * Seek to a time and render that frame.
@@ -119,6 +124,11 @@ export class Player {
 
   private async _doSeek(time: number): Promise<void> {
     this._currentTime = time;
+    if (this._playing) {
+      this.playStartWallTime = performance.now();
+      this.playStartMediaTime = time;
+      this.playbackSeekTime = time;
+    }
     try {
       const result = await this.canvasSink.getCanvas(time);
       if (result) {
@@ -131,12 +141,65 @@ export class Player {
     this.emit('statechange', this.getState());
   }
 
-  async play(): Promise<void> {
+  /**
+   * Render a hover preview frame on the main canvas.
+   * Does NOT update playhead position or emit timeupdate.
+   * Uses the same seekInFlight lock as regular seeks to coalesce calls.
+   */
+  async showHoverPreview(time: number): Promise<void> {
+    const clamped = Math.max(0, Math.min(time, this._duration));
+    this._hoverTime = clamped;
+
+    if (this._playing) return;
+
+    if (this.seekInFlight) {
+      this.pendingSeekTime = clamped;
+      return;
+    }
+
+    this.seekInFlight = true;
+    try {
+      await this._doHoverSeek(clamped);
+      while (this.pendingSeekTime !== null) {
+        const next = this.pendingSeekTime;
+        this.pendingSeekTime = null;
+        await this._doHoverSeek(next);
+      }
+    } finally {
+      this.seekInFlight = false;
+    }
+  }
+
+  private async _doHoverSeek(time: number): Promise<void> {
+    try {
+      const result = await this.canvasSink.getCanvas(time);
+      if (result) {
+        this.emit('frameReady', result.canvas);
+      }
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Revert the main canvas frame to the actual current playhead time.
+   */
+  async clearHoverPreview(): Promise<void> {
+    this._hoverTime = null;
+    if (this._playing) return;
+    await this.seekTo(this._currentTime);
+  }
+
+
+
+  async play(startTime?: number): Promise<void> {
     if (this._playing) return;
     this._playing = true;
 
     this.playStartWallTime = performance.now();
-    this.playStartMediaTime = this._currentTime;
+    this.playStartMediaTime = startTime !== undefined ? startTime : this._currentTime;
+    this._currentTime = this.playStartMediaTime;
+    this.playbackSeekTime = null;
     this.playbackAbort = new AbortController();
     const { signal } = this.playbackAbort;
 
@@ -150,14 +213,33 @@ export class Player {
 
     this.emit('statechange', this.getState());
 
-    // Sequential decode loop — await each frame before requesting the next.
-    // This is the key: never more than ONE decode in flight at a time.
+    // Sequential decode loop — pre-decode frames smoothly using canvases iterator.
     const loop = async () => {
-      while (!signal.aborted) {
-        const elapsed = (performance.now() - this.playStartWallTime) / 1000;
-        const mediaTime = this.playStartMediaTime + elapsed * this._speed;
+      let iterator = this.canvasSink.canvases(this.playStartMediaTime);
 
-        if (mediaTime >= this._duration) {
+      while (!signal.aborted) {
+        // Handle dynamic seek/jump during playback
+        if (this.playbackSeekTime !== null) {
+          const seekTime = this.playbackSeekTime;
+          this.playbackSeekTime = null;
+          this.playStartWallTime = performance.now();
+          this.playStartMediaTime = seekTime;
+          iterator = this.canvasSink.canvases(seekTime);
+          continue;
+        }
+
+        let result: IteratorResult<WrappedCanvas>;
+        try {
+          result = await iterator.next();
+        } catch {
+          if (signal.aborted) return;
+          break;
+        }
+
+        if (signal.aborted) return;
+
+        if (result.done) {
+          // Reached end of source video
           this._currentTime = this._duration;
           this._playing = false;
           this.emit('timeupdate', this._currentTime);
@@ -165,26 +247,73 @@ export class Player {
           return;
         }
 
-        this._currentTime = mediaTime;
+        const frame = result.value;
+        if (!frame) continue;
 
-        try {
-          const result = await this.canvasSink.getCanvas(mediaTime);
-          if (!signal.aborted && result) {
-            this.emit('frameReady', result.canvas);
-          }
-        } catch {
-          if (signal.aborted) return;
+        const segments = useEditStore.getState().segments;
+        if (segments.length === 0) {
+          this._currentTime = this._duration;
+          this._playing = false;
+          this.emit('timeupdate', this._currentTime);
+          this.emit('statechange', this.getState());
+          return;
         }
 
-        this.emit('timeupdate', this._currentTime);
+        // Find which segment the frame timestamp belongs to
+        let segIdx = segments.findIndex((s) => frame.timestamp >= s.start && frame.timestamp < s.end);
+
+        if (segIdx === -1) {
+          // The frame is not in any segment. We need to jump to the next segment in the timeline array.
+          // Let's find which segment the current playhead (this._currentTime) was in.
+          const lastSegIdx = segments.findIndex((s) => this._currentTime >= s.start && this._currentTime <= s.end);
+
+          let nextSegIdx = -1;
+          if (lastSegIdx !== -1) {
+            nextSegIdx = lastSegIdx + 1;
+          } else {
+            // Fallback: find the first segment in the timeline that starts after this._currentTime chronologically
+            nextSegIdx = segments.findIndex((s) => s.start > this._currentTime);
+          }
+
+          if (nextSegIdx !== -1 && nextSegIdx < segments.length) {
+            const nextSeg = segments[nextSegIdx];
+            this.playStartWallTime = performance.now();
+            this.playStartMediaTime = nextSeg.start;
+            this.playbackSeekTime = null;
+            iterator = this.canvasSink.canvases(nextSeg.start);
+            continue;
+          } else {
+            // No next segment, stop playing and pause at the end of the last segment in the array
+            const lastSeg = segments[segments.length - 1];
+            this._currentTime = lastSeg ? lastSeg.end : this._duration;
+            this._playing = false;
+            this.emit('timeupdate', this._currentTime);
+            this.emit('statechange', this.getState());
+            return;
+          }
+        }
+
+        // Calculate when to display this frame
+        const targetWallTime = this.playStartWallTime + ((frame.timestamp - this.playStartMediaTime) / this._speed) * 1000;
+
+        // Wait until targetWallTime is reached
+        let delay = targetWallTime - performance.now();
+        if (delay > 0) {
+          if (delay > 16) {
+            await new Promise<void>((resolve) => setTimeout(resolve, delay - 8));
+          }
+          while (targetWallTime - performance.now() > 0.5) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            if (signal.aborted) return;
+          }
+        }
 
         if (signal.aborted) return;
 
-        // Yield to the event loop — wait for next animation frame before
-        // requesting the next decode. This caps us at ≤ 1 decode per frame.
-        await new Promise<void>((resolve) => {
-          requestAnimationFrame(() => resolve());
-        });
+        // Draw the frame
+        this._currentTime = frame.timestamp;
+        this.emit('frameReady', frame.canvas);
+        this.emit('timeupdate', this._currentTime);
       }
     };
 
@@ -199,9 +328,9 @@ export class Player {
     this.emit('statechange', this.getState());
   }
 
-  togglePlayPause(): void {
+  togglePlayPause(startTime?: number): void {
     if (this._playing) this.pause();
-    else void this.play();
+    else void this.play(startTime);
   }
 
   setSpeed(speed: number): void {

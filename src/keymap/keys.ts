@@ -30,23 +30,66 @@ export function registerKeymap(deps: KeymapDeps): () => void {
   const actions: Record<string, (e: KeyboardEvent) => void> = {
     playPause(e) {
       e.preventDefault();
-      getPlayer()?.togglePlayPause();
+      const p = getPlayer();
+      if (!p) return;
+      if (!p.playing && p.hoverTime !== null) {
+        const targetTime = p.hoverTime;
+        const store = getEditStore();
+        store.setCurrentTime(targetTime);
+        void p.play(targetTime);
+      } else {
+        p.togglePlayPause();
+      }
     },
     cutAtCursor(e) {
       e.preventDefault();
-      getEditStore().cutAtCursor();
+      const store = getEditStore();
+      const p = getPlayer();
+      const targetTime = (p && p.hoverTime !== null) ? p.hoverTime : store.currentTime;
+      store.cutAtCursor(targetTime);
+      store.setCurrentTime(targetTime);
+      void p?.seekTo(targetTime);
     },
     trimLeft(e) {
       e.preventDefault();
-      getEditStore().trimLeft();
+      const store = getEditStore();
+      const p = getPlayer();
+      const targetTime = (p && p.hoverTime !== null) ? p.hoverTime : store.currentTime;
+      store.trimLeft(targetTime);
+      store.setCurrentTime(targetTime);
+      void p?.seekTo(targetTime);
     },
     trimRight(e) {
       e.preventDefault();
-      getEditStore().trimRight();
+      const store = getEditStore();
+      const p = getPlayer();
+      const targetTime = (p && p.hoverTime !== null) ? p.hoverTime : store.currentTime;
+      store.trimRight(targetTime);
+      store.setCurrentTime(targetTime);
+      void p?.seekTo(targetTime);
     },
     deleteSelection(e) {
       e.preventDefault();
-      getEditStore().deleteSelection();
+      const store = getEditStore();
+      if (store.selectionStart !== null && store.selectionEnd !== null) {
+        store.deleteSelection();
+      } else if (store.selectedSegmentIndex !== null) {
+        store.deleteSelectedSegment();
+      }
+    },
+    moveSegmentLeft(e) {
+      e.preventDefault();
+      const store = getEditStore();
+      if (store.selectedSegmentIndex !== null) {
+        store.moveSegment(store.selectedSegmentIndex, 'left');
+      }
+    },
+    moveSegmentRight(e) {
+      e.preventDefault();
+      const store = getEditStore();
+      if (store.selectedSegmentIndex !== null) {
+        store.moveSegment(store.selectedSegmentIndex, 'right');
+      }
     },
     frameStepBack(e) {
       e.preventDefault();

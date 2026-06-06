@@ -249,8 +249,8 @@ export default function App() {
               id="btn-cut"
               variant="ghost"
               size="sm"
-              onClick={cutAtCursor}
-              title="Cut at cursor (C)"
+              onClick={() => cutAtCursor()}
+              title="Cut at cursor (S)"
             >
               <Scissors />
               Cut
@@ -260,8 +260,8 @@ export default function App() {
               id="btn-trim-left"
               variant="ghost"
               size="sm"
-              onClick={trimLeft}
-              title="Trim left (Q)"
+              onClick={() => trimLeft()}
+              title="Trim left (A)"
             >
               <ChevronLeft />
               Trim L
@@ -271,8 +271,8 @@ export default function App() {
               id="btn-trim-right"
               variant="ghost"
               size="sm"
-              onClick={trimRight}
-              title="Trim right (W)"
+              onClick={() => trimRight()}
+              title="Trim right (D)"
             >
               <ChevronRight />
               Trim R

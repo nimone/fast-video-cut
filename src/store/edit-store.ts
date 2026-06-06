@@ -19,12 +19,16 @@ interface EditStoreState {
   // Segments (kept regions)
   segments: Segment[];
 
+  // Selected segment index (for reordering, deletion, visual highlight)
+  selectedSegmentIndex: number | null;
+
   // Undo/redo history — each entry is a snapshot of segments
   history: Segment[][];
   historyIndex: number;
 
   // Player state (shared)
   currentTime: number;
+  hoverTime: number | null;
 
   // Selected range on timeline (for delete)
   selectionStart: number | null;
@@ -33,14 +37,18 @@ interface EditStoreState {
   // Actions
   initFile: (file: File, duration: number, keyframeTimes: number[], fps: number) => void;
   setCurrentTime: (time: number) => void;
+  setHoverTime: (time: number | null) => void;
   setSelection: (start: number | null, end: number | null) => void;
+  setSelectedSegmentIndex: (idx: number | null) => void;
 
   // Edit ops
-  cutAtCursor: () => void;
-  trimLeft: () => void;
-  trimRight: () => void;
+  cutAtCursor: (time?: number) => void;
+  trimLeft: (time?: number) => void;
+  trimRight: (time?: number) => void;
   deleteSelection: () => void;
   deleteSegmentByIndex: (idx: number) => void;
+  deleteSelectedSegment: () => void;
+  moveSegment: (idx: number, direction: 'left' | 'right') => void;
 
   undo: () => void;
   redo: () => void;
@@ -74,9 +82,11 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
   keyframeTimes: [],
   fps: 30,
   segments: [],
+  selectedSegmentIndex: null,
   history: [],
   historyIndex: -1,
   currentTime: 0,
+  hoverTime: null,
   selectionStart: null,
   selectionEnd: null,
 
@@ -89,9 +99,11 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       keyframeTimes,
       fps,
       segments: initialSegments,
+      selectedSegmentIndex: null,
       history: initialHistory,
       historyIndex: 0,
       currentTime: 0,
+      hoverTime: null,
       selectionStart: null,
       selectionEnd: null,
     });
@@ -101,13 +113,22 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
     set({ currentTime: time });
   },
 
+  setHoverTime(time) {
+    set({ hoverTime: time });
+  },
+
   setSelection(start, end) {
     set({ selectionStart: start, selectionEnd: end });
   },
 
-  cutAtCursor() {
+  setSelectedSegmentIndex(idx) {
+    set({ selectedSegmentIndex: idx });
+  },
+
+  cutAtCursor(time) {
     const { currentTime, segments, keyframeTimes, history, historyIndex } = get();
-    const snapTime = snapStart(currentTime, keyframeTimes);
+    const targetTime = typeof time === 'number' ? time : currentTime;
+    const snapTime = snapStart(targetTime, keyframeTimes);
 
     const newSegments: Segment[] = [];
     let didCut = false;
@@ -129,52 +150,55 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
     set({ segments: newSegments, ...h });
   },
 
-  trimLeft() {
-    // Remove everything from start up to cursor (snapped to keyframe).
-    // Effectively: update the containing segment's start to cursor.
+  trimLeft(time) {
     const { currentTime, segments, keyframeTimes, history, historyIndex } = get();
-    const snapTime = snapStart(currentTime, keyframeTimes);
+    const targetTime = typeof time === 'number' ? time : currentTime;
+    const snapTime = snapStart(targetTime, keyframeTimes);
 
-    const newSegments: Segment[] = [];
-    for (const seg of segments) {
-      if (snapTime >= seg.end) {
-        // Entirely before cursor — remove this segment
-        continue;
-      }
-      if (snapTime > seg.start) {
-        // Cursor is inside this segment — trim start
-        newSegments.push({ start: snapTime, end: seg.end });
-      } else {
-        newSegments.push({ ...seg });
-      }
-    }
+    // Find the segment containing the cursor
+    const containingSegIdx = segments.findIndex(
+      (seg) => snapTime >= seg.start && snapTime <= seg.end
+    );
 
-    if (newSegments.length === 0) return; // Would remove everything
+    if (containingSegIdx === -1) return; // Cursor is not in any segment
+
+    const newSegments = segments
+      .map((seg, idx) => {
+        if (idx === containingSegIdx) {
+          return { start: snapTime, end: seg.end };
+        }
+        return { ...seg };
+      })
+      .filter((seg) => seg.start < seg.end);
+
+    if (newSegments.length === 0) return; // Keep at least one segment
 
     const h = pushHistory(history, historyIndex, newSegments);
     set({ segments: newSegments, ...h });
   },
 
-  trimRight() {
-    // Remove everything from cursor onward.
+  trimRight(time) {
     const { currentTime, segments, keyframeTimes, history, historyIndex } = get();
-    const snapTime = snapStart(currentTime, keyframeTimes);
+    const targetTime = typeof time === 'number' ? time : currentTime;
+    const snapTime = snapStart(targetTime, keyframeTimes);
 
-    const newSegments: Segment[] = [];
-    for (const seg of segments) {
-      if (snapTime <= seg.start) {
-        // Entirely after cursor — remove
-        continue;
-      }
-      if (snapTime < seg.end) {
-        // Cursor inside — trim end
-        newSegments.push({ start: seg.start, end: snapTime });
-      } else {
-        newSegments.push({ ...seg });
-      }
-    }
+    // Find the segment containing the cursor
+    const containingSegIdx = segments.findIndex(
+      (seg) => snapTime >= seg.start && snapTime <= seg.end
+    );
 
-    if (newSegments.length === 0) return;
+    if (containingSegIdx === -1) return; // Cursor is not in any segment
+
+    const newSegments = segments
+      .map((seg, idx) => {
+        if (idx === containingSegIdx) {
+          return { start: seg.start, end: snapTime };
+        }
+        return { ...seg };
+      })
+      .filter((seg) => seg.start < seg.end);
+
+    if (newSegments.length === 0) return; // Keep at least one segment
 
     const h = pushHistory(history, historyIndex, newSegments);
     set({ segments: newSegments, ...h });
@@ -215,11 +239,57 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
   },
 
   deleteSegmentByIndex(idx) {
-    const { segments, history, historyIndex } = get();
+    const { segments, history, historyIndex, selectedSegmentIndex } = get();
     if (segments.length <= 1) return; // Can't remove last segment
     const newSegments = segments.filter((_, i) => i !== idx);
     const h = pushHistory(history, historyIndex, newSegments);
-    set({ segments: newSegments, ...h });
+
+    let newSelectedIdx = selectedSegmentIndex;
+    if (selectedSegmentIndex === idx) {
+      newSelectedIdx = null;
+    } else if (selectedSegmentIndex !== null && selectedSegmentIndex > idx) {
+      newSelectedIdx = selectedSegmentIndex - 1;
+    }
+
+    set({
+      segments: newSegments,
+      selectedSegmentIndex: newSelectedIdx,
+      ...h
+    });
+  },
+
+  deleteSelectedSegment() {
+    const { selectedSegmentIndex, deleteSegmentByIndex } = get();
+    if (selectedSegmentIndex !== null) {
+      deleteSegmentByIndex(selectedSegmentIndex);
+    }
+  },
+
+  moveSegment(idx, direction) {
+    const { segments, history, historyIndex, selectedSegmentIndex } = get();
+    if (idx < 0 || idx >= segments.length) return;
+    const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
+    if (targetIdx < 0 || targetIdx >= segments.length) return;
+
+    const newSegments = [...segments];
+    const temp = newSegments[idx];
+    newSegments[idx] = newSegments[targetIdx];
+    newSegments[targetIdx] = temp;
+
+    const h = pushHistory(history, historyIndex, newSegments);
+
+    let newSelectedIdx = selectedSegmentIndex;
+    if (selectedSegmentIndex === idx) {
+      newSelectedIdx = targetIdx;
+    } else if (selectedSegmentIndex === targetIdx) {
+      newSelectedIdx = idx;
+    }
+
+    set({
+      segments: newSegments,
+      selectedSegmentIndex: newSelectedIdx,
+      ...h
+    });
   },
 
   undo() {

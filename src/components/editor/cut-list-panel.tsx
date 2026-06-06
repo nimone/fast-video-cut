@@ -1,7 +1,4 @@
-// src/components/editor/cut-list-panel.tsx
-// Panel showing the list of kept segments. Click to jump.
-
-import { Trash2, Clock } from 'lucide-react';
+import { Trash2, Clock, ArrowUp, ArrowDown } from 'lucide-react';
 import { useEditStore } from '../../store/edit-store';
 import type { Player } from '../../media/player';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
@@ -19,7 +16,15 @@ function formatTime(s: number): string {
 }
 
 export function CutListPanel({ player }: CutListPanelProps) {
-  const { segments, deleteSegmentByIndex, setCurrentTime, duration } = useEditStore();
+  const {
+    segments,
+    selectedSegmentIndex,
+    setSelectedSegmentIndex,
+    deleteSegmentByIndex,
+    moveSegment,
+    setCurrentTime,
+    duration,
+  } = useEditStore();
 
   const totalKept = segments.reduce((acc, s) => acc + (s.end - s.start), 0);
   const totalRemoved = duration - totalKept;
@@ -52,18 +57,22 @@ export function CutListPanel({ player }: CutListPanelProps) {
             <ul className="divide-y divide-border">
               {segments.map((seg, i) => {
                 const dur = seg.end - seg.start;
+                const isSelected = selectedSegmentIndex === i;
                 return (
                   <li
                     key={i}
                     id={`segment-${i}`}
-                    className="flex items-center gap-2 px-3 py-2.5 hover:bg-accent/50 transition-colors group cursor-pointer"
+                    className={`flex items-center gap-2 px-3 py-2.5 hover:bg-accent/50 transition-colors group cursor-pointer ${
+                      isSelected ? 'bg-primary/10 border-l-2 border-l-primary' : 'border-l-2 border-l-transparent'
+                    }`}
                     onClick={() => {
                       setCurrentTime(seg.start);
                       void player?.seekTo(seg.start);
+                      setSelectedSegmentIndex(i);
                     }}
                   >
                     {/* Segment color indicator */}
-                    <div className="w-1.5 h-8 rounded-full bg-primary flex-shrink-0" />
+                    <div className={`w-1.5 h-8 rounded-full flex-shrink-0 ${isSelected ? 'bg-amber-500' : 'bg-primary'}`} />
 
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 text-xs font-mono">
@@ -79,22 +88,55 @@ export function CutListPanel({ player }: CutListPanelProps) {
                       </div>
                     </div>
 
-                    {/* Delete */}
-                    {segments.length > 1 && (
-                      <Button
-                        id={`delete-segment-${i}`}
-                        variant="ghost"
-                        size="icon-xs"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteSegmentByIndex(i);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 text-muted-foreground/65 hover:text-destructive transition-all"
-                        title="Remove segment"
-                      >
-                        <Trash2 />
-                      </Button>
-                    )}
+                    {/* Actions */}
+                    <div
+                      className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 data-[selected=true]:opacity-100 transition-all"
+                      data-selected={isSelected}
+                    >
+                      {i > 0 && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveSegment(i, 'left');
+                          }}
+                          className="text-muted-foreground/65 hover:text-primary transition-all"
+                          title="Move up"
+                        >
+                          <ArrowUp className="size-3" />
+                        </Button>
+                      )}
+                      {i < segments.length - 1 && (
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            moveSegment(i, 'right');
+                          }}
+                          className="text-muted-foreground/65 hover:text-primary transition-all"
+                          title="Move down"
+                        >
+                          <ArrowDown className="size-3" />
+                        </Button>
+                      )}
+                      {segments.length > 1 && (
+                        <Button
+                          id={`delete-segment-${i}`}
+                          variant="ghost"
+                          size="icon-xs"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            deleteSegmentByIndex(i);
+                          }}
+                          className="text-muted-foreground/65 hover:text-destructive transition-all"
+                          title="Remove segment"
+                        >
+                          <Trash2 className="size-3" />
+                        </Button>
+                      )}
+                    </div>
                   </li>
                 );
               })}

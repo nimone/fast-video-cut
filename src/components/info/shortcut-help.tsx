@@ -29,7 +29,7 @@ const SECTIONS: Array<{ title: string; actions: ActionName[] }> = [
   },
   {
     title: 'Editing',
-    actions: ['cutAtCursor', 'trimLeft', 'trimRight', 'deleteSelection', 'undo', 'redo'],
+    actions: ['cutAtCursor', 'trimLeft', 'trimRight', 'deleteSelection', 'moveSegmentLeft', 'moveSegmentRight', 'undo', 'redo'],
   },
   {
     title: 'Navigation',

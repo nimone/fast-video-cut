@@ -7,6 +7,8 @@ import {
 } from 'lucide-react';
 import { useEditStore } from '../../store/edit-store';
 import type { Player as PlayerEngine } from '../../media/player';
+import { Button } from '@/components/ui/button';
+import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
 
 interface PlayerProps {
   player: PlayerEngine | null;
@@ -73,14 +75,14 @@ export function PlayerPanel({ player }: PlayerProps) {
   const progressFrac = duration > 0 ? currentTime / duration : 0;
 
   return (
-    <div className="flex flex-col h-full bg-[#0a0a14] rounded-xl overflow-hidden border border-white/5">
+    <div className="flex flex-col h-full bg-card rounded-xl overflow-hidden border border-border">
       {/* Video canvas */}
       <div
         className="flex-1 relative flex items-center justify-center bg-black overflow-hidden"
         id="player-canvas-wrapper"
       >
         {!player ? (
-          <div className="text-center text-white/30 select-none">
+          <div className="text-center text-muted-foreground select-none">
             <div className="text-5xl mb-3 opacity-30">▶</div>
             <p className="text-sm">Open a video to begin</p>
           </div>
@@ -99,92 +101,102 @@ export function PlayerPanel({ player }: PlayerProps) {
       {player && (
         <div className="relative h-1 bg-white/10 mx-0">
           <div
-            className="absolute left-0 top-0 h-full bg-[#ff4c8b] transition-none"
+            className="absolute left-0 top-0 h-full bg-primary transition-none"
             style={{ width: `${progressFrac * 100}%` }}
           />
         </div>
       )}
 
       {/* Transport controls */}
-      <div className="flex items-center gap-2 px-4 py-2 bg-[#111124] border-t border-white/5">
+      <div className="flex items-center gap-2 px-4 py-2 bg-muted/32 border-t border-border">
         {/* Time */}
-        <span className="font-mono text-xs text-white/60 min-w-[90px]">
+        <span className="font-mono text-xs text-foreground/60 min-w-[90px]">
           {formatTime(currentTime)}
         </span>
-        <span className="text-white/20 text-xs">/</span>
-        <span className="font-mono text-xs text-white/40 min-w-[90px]">
+        <span className="text-muted-foreground/30 text-xs">/</span>
+        <span className="font-mono text-xs text-muted-foreground/55 min-w-[90px]">
           {formatTime(duration)}
         </span>
 
         <div className="flex-1" />
 
         {/* Controls */}
-        <button
+        <Button
           id="btn-big-jump-back"
           onClick={() => handleBigJump(-1)}
-          className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+          variant="ghost"
+          size="icon-sm"
           title="Jump -5s (Shift+←)"
         >
-          <SkipBack size={16} />
-        </button>
+          <SkipBack />
+        </Button>
 
-        <button
+        <Button
           id="btn-frame-back"
           onClick={() => handleFrameStep(-1)}
-          className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+          variant="ghost"
+          size="icon-sm"
           title="Frame back (←)"
         >
-          <ChevronFirst size={16} />
-        </button>
+          <ChevronFirst />
+        </Button>
 
-        <button
+        <Button
           id="btn-play-pause"
           onClick={() => player?.togglePlayPause()}
-          className="p-2 rounded-xl bg-[#5b4fff] hover:bg-[#7065ff] text-white transition-colors shadow-lg"
+          variant="default"
+          size="icon"
+          className="rounded-lg shadow-lg shadow-primary/20"
           title="Play/Pause (Space)"
         >
-          {playing ? <Pause size={18} /> : <Play size={18} />}
-        </button>
+          {playing ? <Pause /> : <Play />}
+        </Button>
 
-        <button
+        <Button
           id="btn-frame-forward"
           onClick={() => handleFrameStep(1)}
-          className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+          variant="ghost"
+          size="icon-sm"
           title="Frame forward (→)"
         >
-          <ChevronLast size={16} />
-        </button>
+          <ChevronLast />
+        </Button>
 
-        <button
+        <Button
           id="btn-big-jump-forward"
           onClick={() => handleBigJump(1)}
-          className="p-1.5 rounded-lg hover:bg-white/10 text-white/60 hover:text-white transition-colors"
+          variant="ghost"
+          size="icon-sm"
           title="Jump +5s (Shift+→)"
         >
-          <SkipForward size={16} />
-        </button>
+          <SkipForward />
+        </Button>
 
         <div className="flex-1" />
 
         {/* Speed */}
-        <div className="flex items-center gap-1">
-          <span className="text-xs text-white/40">Speed</span>
-          <select
-            id="speed-select"
-            value={speed}
-            onChange={(e) => {
-              const s = parseFloat(e.target.value);
+        <div className="flex items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">Speed</span>
+          <Select
+            value={String(speed)}
+            onValueChange={(val) => {
+              if (!val) return;
+              const s = parseFloat(val);
               player?.setSpeed(s);
               setSpeed(s);
             }}
-            className="bg-white/5 text-white/70 text-xs rounded-lg px-2 py-1 border border-white/10 focus:outline-none focus:border-[#5b4fff]"
           >
-            {SPEED_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {s}×
-              </option>
-            ))}
-          </select>
+            <SelectTrigger size="sm" className="min-w-20">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SPEED_OPTIONS.map((s) => (
+                <SelectItem key={s} value={String(s)}>
+                  {s}×
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </div>
     </div>

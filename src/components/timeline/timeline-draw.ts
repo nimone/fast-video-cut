@@ -59,7 +59,6 @@ function formatTime(seconds: number): string {
 export function drawTimeline(opts: TimelineDrawOptions): void {
   const {
     canvas,
-    duration,
     segments,
     keyframeTimes,
     currentTime,
@@ -248,7 +247,6 @@ function drawKeyframeTicks(
   dpr: number
 ): void {
   // Only draw if there's a reasonable density
-  const pixelsPerSecond = W / (viewEnd - viewStart);
   const minPixelsPerTick = 3 * dpr;
 
   // Binary search start

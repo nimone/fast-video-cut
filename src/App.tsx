@@ -16,6 +16,9 @@ import { Player } from './media/player';
 import { useEditStore } from './store/edit-store';
 import { useKeymapStore } from './store/keymap-store';
 import { registerKeymap } from './keymap/keys';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Spinner } from '@/components/ui/spinner';
 
 function formatDuration(s: number): string {
   const m = Math.floor(s / 60);
@@ -46,7 +49,6 @@ export default function App() {
     file,
     duration,
     segments,
-    currentTime,
     canUndo,
     canRedo,
     undo,
@@ -56,7 +58,6 @@ export default function App() {
     trimRight,
     deleteSelection,
     selectionStart,
-    selectionEnd,
     initFile,
   } = useEditStore();
 
@@ -152,7 +153,7 @@ export default function App() {
 
   return (
     <div
-      className="min-h-screen bg-[#07070f] text-white flex flex-col select-none"
+      className="min-h-screen bg-background text-foreground flex flex-col select-none"
       onDrop={handleDrop}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -169,66 +170,69 @@ export default function App() {
 
       {/* Drag overlay */}
       {isDragOver && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#5b4fff]/20 backdrop-blur-sm border-2 border-dashed border-[#5b4fff] pointer-events-none">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-primary/10 backdrop-blur-xs border-2 border-dashed border-primary pointer-events-none">
           <div className="text-center">
-            <Film size={48} className="mx-auto mb-3 text-[#5b4fff]" />
-            <p className="text-xl font-semibold text-white">Drop video here</p>
+            <Film className="mx-auto mb-3 text-primary size-12" />
+            <p className="text-xl font-semibold text-foreground">Drop video here</p>
           </div>
         </div>
       )}
 
       {/* Top navbar */}
-      <header className="flex items-center gap-3 px-4 h-12 bg-[#0a0a16] border-b border-white/5 flex-shrink-0">
+      <header className="flex items-center gap-3 px-4 h-12 bg-card border-b border-border flex-shrink-0">
         {/* Logo */}
         <div className="flex items-center gap-2 mr-3">
-          <Scissors size={18} className="text-[#5b4fff]" />
-          <span className="font-semibold text-sm tracking-tight text-white">
-            Video<span className="text-[#5b4fff]">Cut</span>
+          <Scissors className="text-primary size-4.5" />
+          <span className="font-semibold text-sm tracking-tight text-foreground">
+            Video<span className="text-primary">Cut</span>
           </span>
         </div>
 
-        <div className="h-4 w-px bg-white/10" />
+        <div className="h-4 w-px bg-border" />
 
         {/* Open file */}
-        <button
+        <Button
           id="btn-open-file"
+          variant="ghost"
+          size="sm"
           onClick={() => fileInputRef.current?.click()}
-          className="flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs text-white/60 hover:text-white hover:bg-white/5 transition-colors"
           title="Open file (Ctrl+O)"
         >
-          <FolderOpen size={13} />
+          <FolderOpen />
           Open
-        </button>
+        </Button>
 
         {/* File info */}
         {file && (
           <>
-            <div className="h-4 w-px bg-white/10" />
-            <div className="flex items-center gap-2 text-xs text-white/40 min-w-0">
-              <Film size={12} className="text-[#5b4fff] flex-shrink-0" />
-              <span className="truncate max-w-48 text-white/60">{file.name}</span>
+            <div className="h-4 w-px bg-border" />
+            <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
+              <Film className="text-primary size-3 flex-shrink-0" />
+              <span className="truncate max-w-48 text-foreground/80">{file.name}</span>
               {probeInfo && (
                 <>
-                  <span className="text-white/20">·</span>
-                  <span className="text-white/30 font-mono">
+                  <span className="text-muted-foreground/30">·</span>
+                  <span className="text-muted-foreground/60 font-mono">
                     {probeInfo.width}×{probeInfo.height}
                   </span>
-                  <span className="text-white/20">·</span>
-                  <span className="text-white/30 font-mono">
+                  <span className="text-muted-foreground/30">·</span>
+                  <span className="text-muted-foreground/60 font-mono">
                     {probeInfo.fps.toFixed(0)}fps
                   </span>
-                  <span className="text-white/20">·</span>
-                  <span className="text-white/30">
+                  <span className="text-muted-foreground/30">·</span>
+                  <span className="text-muted-foreground/60">
                     {formatDuration(duration)}
                   </span>
                   {probeInfo.keyframeInterval > 2 && (
-                    <div
-                      className="flex items-center gap-1 px-2 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-400/80 text-[10px]"
+                    <Badge
+                      variant="warning"
+                      size="sm"
+                      className="gap-1"
                       title={`Keyframe interval: ${probeInfo.keyframeInterval.toFixed(1)}s — cuts may snap noticeably`}
                     >
-                      <AlertTriangle size={9} />
+                      <AlertTriangle className="size-3" />
                       Coarse keyframes
-                    </div>
+                    </Badge>
                   )}
                 </>
               )}
@@ -241,95 +245,104 @@ export default function App() {
         {/* Edit actions */}
         {file && (
           <div className="flex items-center gap-1">
-            <button
+            <Button
               id="btn-cut"
+              variant="ghost"
+              size="sm"
               onClick={cutAtCursor}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white hover:bg-white/5 transition-colors"
               title="Cut at cursor (C)"
             >
-              <Scissors size={12} />
+              <Scissors />
               Cut
-            </button>
+            </Button>
 
-            <button
+            <Button
               id="btn-trim-left"
+              variant="ghost"
+              size="sm"
               onClick={trimLeft}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white hover:bg-white/5 transition-colors"
               title="Trim left (Q)"
             >
-              <ChevronLeft size={12} />
+              <ChevronLeft />
               Trim L
-            </button>
+            </Button>
 
-            <button
+            <Button
               id="btn-trim-right"
+              variant="ghost"
+              size="sm"
               onClick={trimRight}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-white/60 hover:text-white hover:bg-white/5 transition-colors"
               title="Trim right (W)"
             >
-              <ChevronRight size={12} />
+              <ChevronRight />
               Trim R
-            </button>
+            </Button>
 
             {(selectionStart !== null) && (
-              <button
+              <Button
                 id="btn-delete-selection"
+                variant="destructive-outline"
+                size="sm"
                 onClick={deleteSelection}
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs text-red-400/60 hover:text-red-400 hover:bg-red-500/10 transition-colors"
                 title="Delete selection (Del)"
               >
-                <Slash size={12} />
+                <Slash />
                 Delete
-              </button>
+              </Button>
             )}
 
-            <div className="h-4 w-px bg-white/10 mx-1" />
+            <div className="h-4 w-px bg-border mx-1" />
 
-            <button
+            <Button
               id="btn-undo"
+              variant="ghost"
+              size="icon-sm"
               onClick={undo}
               disabled={!canUndo()}
-              className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
               title="Undo (Ctrl+Z)"
             >
-              <RotateCcw size={14} />
-            </button>
+              <RotateCcw />
+            </Button>
 
-            <button
+            <Button
               id="btn-redo"
+              variant="ghost"
+              size="icon-sm"
               onClick={redo}
               disabled={!canRedo()}
-              className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 disabled:opacity-20 disabled:cursor-not-allowed transition-colors"
               title="Redo (Ctrl+Shift+Z)"
             >
-              <RotateCw size={14} />
-            </button>
+              <RotateCw />
+            </Button>
           </div>
         )}
 
-        <div className="h-4 w-px bg-white/10 mx-1" />
+        <div className="h-4 w-px bg-border mx-1" />
 
         {/* Help */}
-        <button
+        <Button
           id="btn-cheatsheet"
+          variant="ghost"
+          size="icon-sm"
           onClick={() => setCheatsheetOpen(true)}
-          className="p-1.5 rounded-lg text-white/40 hover:text-white hover:bg-white/5 transition-colors"
           title="Keyboard shortcuts (?)"
         >
-          <HelpCircle size={15} />
-        </button>
+          <HelpCircle />
+        </Button>
 
         {/* Export */}
         {file && segments.length > 0 && (
-          <button
+          <Button
             id="btn-export"
+            variant="default"
+            size="sm"
             onClick={() => setExportOpen(true)}
-            className="flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-medium bg-[#5b4fff] hover:bg-[#7065ff] text-white transition-colors shadow-lg shadow-[#5b4fff]/30 ml-1"
+            className="ml-1 shadow-lg shadow-primary/20"
             title="Export (Ctrl+E)"
           >
-            <Download size={13} />
+            <Download />
             Export
-          </button>
+          </Button>
         )}
       </header>
 
@@ -339,49 +352,52 @@ export default function App() {
           // Drop zone / welcome
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center max-w-sm">
-              <div className="w-20 h-20 rounded-2xl bg-[#5b4fff]/10 border border-[#5b4fff]/20 flex items-center justify-center mx-auto mb-6">
-                <Film size={36} className="text-[#5b4fff]" />
+              <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-6">
+                <Film className="text-primary size-9" />
               </div>
-              <h1 className="text-2xl font-bold mb-2 text-white">
-                Video<span className="text-[#5b4fff]">Cut</span>
+              <h1 className="text-2xl font-bold mb-2 text-foreground">
+                Video<span className="text-primary">Cut</span>
               </h1>
-              <p className="text-sm text-white/40 mb-6">
+              <p className="text-sm text-muted-foreground mb-6">
                 Fast, keyboard-driven lossless trimmer.
                 <br />
                 No re-encoding. Snaps to keyframes.
               </p>
 
               {loadError && (
-                <div className="mb-4 p-3 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs text-left">
+                <div className="mb-4 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive-foreground text-xs text-left">
                   <div className="flex items-center gap-2 mb-1">
-                    <AlertTriangle size={12} />
+                    <AlertTriangle className="size-3.5" />
                     <strong>Error loading file</strong>
                   </div>
                   {loadError}
                 </div>
               )}
 
-              <button
+              <Button
                 id="btn-open-file-welcome"
+                variant="default"
+                size="lg"
                 onClick={() => fileInputRef.current?.click()}
-                className="w-full flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-[#5b4fff] hover:bg-[#7065ff] text-white font-medium transition-colors shadow-lg shadow-[#5b4fff]/30 mb-3"
+                className="w-full justify-center mb-3 shadow-lg shadow-primary/20"
               >
-                <FolderOpen size={16} />
+                <FolderOpen />
                 Open Video File
-              </button>
+              </Button>
 
-              <p className="text-xs text-white/25">
+              <p className="text-xs text-muted-foreground/50">
                 or drag & drop a video file here
               </p>
 
-              <div className="mt-6 grid grid-cols-3 gap-2 text-xs text-white/30">
+              <div className="mt-6 grid grid-cols-3 gap-2">
                 {['MKV', 'MP4', 'WebM', 'MOV', '60fps', 'H.264'].map((tag) => (
-                  <span
+                  <Badge
                     key={tag}
-                    className="px-2 py-1 rounded-lg bg-white/5 border border-white/5"
+                    variant="outline"
+                    className="justify-center py-1"
                   >
                     {tag}
-                  </span>
+                  </Badge>
                 ))}
               </div>
             </div>
@@ -389,9 +405,9 @@ export default function App() {
         ) : loading ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
-              <div className="w-10 h-10 border-2 border-[#5b4fff] border-t-transparent rounded-full animate-spin mx-auto mb-4" />
-              <p className="text-sm text-white/50">Loading video…</p>
-              <p className="text-xs text-white/25 mt-1">Probing keyframes…</p>
+              <Spinner className="size-10 mx-auto mb-4 text-primary" />
+              <p className="text-sm text-muted-foreground">Loading video…</p>
+              <p className="text-xs text-muted-foreground/50 mt-1">Probing keyframes…</p>
             </div>
           </div>
         ) : (
@@ -406,7 +422,7 @@ export default function App() {
               {/* Timeline */}
               <div
                 id="timeline-container"
-                className="h-32 rounded-xl overflow-hidden border border-white/5"
+                className="h-32 rounded-xl overflow-hidden border border-border"
               >
                 <Timeline player={player} className="h-full" />
               </div>

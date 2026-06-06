@@ -28,9 +28,6 @@ type PlayerListeners = {
 };
 
 export class Player {
-  private input: Input;
-  private videoTrack: InputVideoTrack;
-  private audioTrack: InputAudioTrack | null;
   private canvasSink: CanvasSink;
   private audioCtx: AudioContext | null = null;
 
@@ -55,14 +52,11 @@ export class Player {
   };
 
   constructor(
-    input: Input,
+    _input: Input,
     videoTrack: InputVideoTrack,
-    audioTrack: InputAudioTrack | null,
+    _audioTrack: InputAudioTrack | null,
     duration: number
   ) {
-    this.input = input;
-    this.videoTrack = videoTrack;
-    this.audioTrack = audioTrack;
     this._duration = duration;
 
     // poolSize=2: reuse canvases to avoid constant VRAM alloc/dealloc

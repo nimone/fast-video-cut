@@ -89,8 +89,8 @@ export async function exportSegments(
   const isMkv = file.name.toLowerCase().endsWith('.mkv');
   let outputFormat: ConstructorParameters<typeof Output>[0]['format'];
   if (isMkv) {
-    const { MatroskaOutputFormat } = await import('mediabunny');
-    outputFormat = new MatroskaOutputFormat();
+    const { MkvOutputFormat } = await import('mediabunny');
+    outputFormat = new MkvOutputFormat();
   } else {
     const { Mp4OutputFormat } = await import('mediabunny');
     outputFormat = new Mp4OutputFormat();

@@ -18,25 +18,25 @@ export interface TimelineDrawOptions {
 }
 
 const COLORS = {
-  bg: '#0a0a0f',
-  track: '#1a1a2e',
+  bg: '#121212', // Neutral dark gray canvas background
+  track: '#262626', // Lighter neutral gray track background
   segment: '#5b4fff',
   segmentHover: '#7c6fff',
   segmentBorder: '#8b7fff',
-  keyframe: '#3d6b8a',
+  keyframe: 'rgba(255, 255, 255, 0.25)',
   keyframeMajor: '#5a9cc5',
   playhead: '#ff4c8b',
   hoverLine: 'rgba(255, 255, 255, 0.35)',
   selection: 'rgba(91, 79, 255, 0.25)',
   selectionBorder: '#5b4fff',
-  gapDark: '#0f0f1a',
+  gapDark: '#1c1c1c',
   timeLabel: 'rgba(255,255,255,0.5)',
-  timeLabelMajor: 'rgba(255,255,255,0.8)',
+  timeLabelMajor: 'rgba(255,255,255,0.85)',
   segmentLabel: 'rgba(255,255,255,0.7)',
 };
 
-const TIMELINE_HEIGHT_FRAC = 0.5; // Fraction of canvas height for segment track
-const TICK_AREA_HEIGHT = 24; // px for time ruler
+const TIMELINE_HEIGHT_FRAC = 0.35; // Sleeker, less track height
+const TICK_AREA_HEIGHT = 22; // px for time ruler
 
 function timeToX(
   time: number,
@@ -140,12 +140,14 @@ export function drawTimeline(opts: TimelineDrawOptions): void {
   ctx.fillStyle = COLORS.bg;
   ctx.fillRect(0, 0, W, H);
 
+  const gapH = 4 * dpr; // Gap space between ruler and track
   const trackTop = TICK_AREA_HEIGHT * dpr;
-  const trackH = (H - trackTop) * TIMELINE_HEIGHT_FRAC;
-  const trackBottom = trackTop + trackH;
+  const actualTrackTop = trackTop + gapH;
+  const trackH = (H - actualTrackTop) * TIMELINE_HEIGHT_FRAC;
+  const trackBottom = actualTrackTop + trackH;
 
-  // Time ruler background
-  ctx.fillStyle = '#111120';
+  // Time ruler background (distinct dark neutral gray)
+  ctx.fillStyle = '#1a1a1a';
   ctx.fillRect(0, 0, W, trackTop);
 
   // Draw time ruler ticks
@@ -153,17 +155,17 @@ export function drawTimeline(opts: TimelineDrawOptions): void {
 
   // Track background
   ctx.fillStyle = COLORS.track;
-  ctx.fillRect(0, trackTop, W, trackH);
+  ctx.fillRect(0, actualTrackTop, W, trackH);
 
   // Selection region
   if (selectionStart !== null && selectionEnd !== null) {
     const sx = timeToX(Math.min(selectionStart, selectionEnd), viewStart, viewEnd, W);
     const ex = timeToX(Math.max(selectionStart, selectionEnd), viewStart, viewEnd, W);
     ctx.fillStyle = COLORS.selection;
-    ctx.fillRect(sx, trackTop, ex - sx, trackH);
+    ctx.fillRect(sx, actualTrackTop, ex - sx, trackH);
     ctx.strokeStyle = COLORS.selectionBorder;
     ctx.lineWidth = 1 * dpr;
-    ctx.strokeRect(sx, trackTop, ex - sx, trackH);
+    ctx.strokeRect(sx, actualTrackTop, ex - sx, trackH);
   }
 
   // Draw kept segments contiguously
@@ -182,7 +184,7 @@ export function drawTimeline(opts: TimelineDrawOptions): void {
     const r = Math.min(6 * dpr, (x2 - x1) / 2);
 
     // Segment background gradient
-    const grad = ctx.createLinearGradient(x1, trackTop, x1, trackBottom);
+    const grad = ctx.createLinearGradient(x1, actualTrackTop, x1, trackBottom);
     if (isSelected) {
       grad.addColorStop(0, '#8b5cf6'); // Violet-500
       grad.addColorStop(0.6, '#6d28d9'); // Violet-700
@@ -199,7 +201,7 @@ export function drawTimeline(opts: TimelineDrawOptions): void {
     }
 
     ctx.beginPath();
-    ctx.roundRect(x1, trackTop, x2 - x1, trackH, r);
+    ctx.roundRect(x1, actualTrackTop, x2 - x1, trackH, r);
     ctx.fillStyle = grad;
     ctx.fill();
 
@@ -210,7 +212,7 @@ export function drawTimeline(opts: TimelineDrawOptions): void {
     ctx.strokeStyle = isSelected ? '#ffd700' : COLORS.segmentBorder;
     ctx.lineWidth = isSelected ? 2.5 * dpr : 1.5 * dpr;
     ctx.beginPath();
-    ctx.roundRect(x1, trackTop, x2 - x1, trackH, r);
+    ctx.roundRect(x1, actualTrackTop, x2 - x1, trackH, r);
     ctx.stroke();
 
     // Segment label
@@ -222,71 +224,112 @@ export function drawTimeline(opts: TimelineDrawOptions): void {
       ctx.fillText(
         formatTime(seg.end - seg.start),
         x1 + segW / 2,
-        trackTop + trackH / 2 + 4 * dpr
+        actualTrackTop + trackH / 2 + 4 * dpr
       );
     }
     accum += dur;
   }
 
   // Keyframe ticks mapped to virtual time
-  drawKeyframeTicks(ctx, keyframeTimes, segments, viewStart, viewEnd, W, trackTop, trackH, dpr);
+  drawKeyframeTicks(ctx, keyframeTimes, segments, viewStart, viewEnd, W, actualTrackTop, trackH, dpr);
 
-  // Hover line
+  // Hover line & label
   if (hoverTime !== null) {
     const hx = timeToX(hoverTime, viewStart, viewEnd, W);
-    ctx.strokeStyle = COLORS.hoverLine;
-    ctx.lineWidth = 1 * dpr;
-    ctx.beginPath();
-    ctx.moveTo(hx, 0);
-    ctx.lineTo(hx, H);
-    ctx.stroke();
-
-    // Hover time label
+    
+    // Label
     const label = formatTime(hoverTime);
     ctx.font = `${9 * dpr}px ui-monospace, monospace`;
     const tw = ctx.measureText(label).width;
-    const lx = Math.min(W - tw - 4 * dpr, Math.max(4 * dpr, hx - tw / 2));
-    ctx.fillStyle = 'rgba(255,255,255,0.9)';
-    ctx.fillRect(lx - 3 * dpr, 2 * dpr, tw + 6 * dpr, 14 * dpr);
-    ctx.fillStyle = '#000';
-    ctx.fillText(label, lx, 12 * dpr);
+    
+    const paddingX = 6 * dpr;
+    const paddingY = 2 * dpr;
+    const rectW = tw + paddingX * 2;
+    const rectH = 11 * dpr + paddingY * 2;
+    
+    const lx = Math.min(W - rectW - 4 * dpr, Math.max(4 * dpr, hx - rectW / 2));
+    const ly = trackTop - rectH - 2 * dpr; // Positioned neatly in the ruler area
+
+    // Hover line (drawn starting from the bottom of the label container)
+    ctx.strokeStyle = COLORS.hoverLine;
+    ctx.lineWidth = 1 * dpr;
+    ctx.beginPath();
+    ctx.moveTo(hx, ly + rectH);
+    ctx.lineTo(hx, H);
+    ctx.stroke();
+
+    // Capsule background for label
+    ctx.fillStyle = 'rgba(20, 20, 30, 0.95)';
+    ctx.beginPath();
+    ctx.roundRect(lx, ly, rectW, rectH, 3 * dpr);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+    ctx.lineWidth = 1 * dpr;
+    ctx.stroke();
+
+    // Text
+    ctx.fillStyle = '#ffffff';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, lx + rectW / 2, ly + rectH / 2 + 0.5 * dpr);
+    ctx.textBaseline = 'alphabetic'; // reset
   }
 
   // Playhead
   const px = timeToX(currentTime, viewStart, viewEnd, W);
   if (px >= 0 && px <= W) {
+    const handleW = 10 * dpr;
+    const handleH = 14 * dpr;
+
+    // Playhead line
     ctx.strokeStyle = COLORS.playhead;
     ctx.lineWidth = 2 * dpr;
     ctx.shadowColor = COLORS.playhead;
     ctx.shadowBlur = 6 * dpr;
     ctx.beginPath();
-    ctx.moveTo(px, 0);
+    ctx.moveTo(px, handleH);
     ctx.lineTo(px, H);
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // Playhead triangle
+    // Playhead handle: rounded pill shape starting at y = 0
     ctx.fillStyle = COLORS.playhead;
     ctx.beginPath();
-    ctx.moveTo(px - 6 * dpr, 0);
-    ctx.lineTo(px + 6 * dpr, 0);
-    ctx.lineTo(px, 10 * dpr);
-    ctx.closePath();
+    ctx.roundRect(px - handleW / 2, 0, handleW, handleH, 3 * dpr);
     ctx.fill();
 
-    // Time under playhead
+    // Time under playhead (solid pill-shaped container at the bottom)
     const plabel = formatTime(currentTime);
     ctx.font = `bold ${9 * dpr}px ui-monospace, monospace`;
+    const ptw = ctx.measureText(plabel).width;
+    
+    const pxPaddingX = 6 * dpr;
+    const pxPaddingY = 3 * dpr;
+    const pxRectW = ptw + pxPaddingX * 2;
+    const pxRectH = 12 * dpr + pxPaddingY * 2;
+    
+    const plx = Math.min(W - pxRectW - 4 * dpr, Math.max(4 * dpr, px - pxRectW / 2));
+    const ply = H - pxRectH - 2 * dpr;
+
+    // Capsule background
     ctx.fillStyle = COLORS.playhead;
+    ctx.beginPath();
+    ctx.roundRect(plx, ply, pxRectW, pxRectH, 4 * dpr);
+    ctx.fill();
+
+    // Bold white text inside capsule
+    ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
-    ctx.fillText(plabel, Math.min(W - 30 * dpr, Math.max(30 * dpr, px)), H - 4 * dpr);
+    ctx.textBaseline = 'middle';
+    ctx.fillText(plabel, plx + pxRectW / 2, ply + pxRectH / 2 + 0.5 * dpr);
+    ctx.textBaseline = 'alphabetic'; // reset
   }
 }
 
 function drawRuler(
   ctx: CanvasRenderingContext2D,
   W: number,
-  height: number,
+  trackTop: number,
   viewStart: number,
   viewEnd: number,
   dpr: number
@@ -309,17 +352,20 @@ function drawRuler(
     const isMajor = Math.abs(t % majorInterval) < interval * 0.01;
 
     ctx.strokeStyle = isMajor ? COLORS.timeLabelMajor : COLORS.timeLabel;
-    ctx.lineWidth = isMajor ? 1.5 * dpr : 0.8 * dpr;
+    ctx.lineWidth = isMajor ? 1.2 * dpr : 0.8 * dpr;
     ctx.beginPath();
-    ctx.moveTo(x, isMajor ? height * 0.3 : height * 0.6);
-    ctx.lineTo(x, height);
+    // Ticks point downwards from the very top of the canvas
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, isMajor ? 6 * dpr : 3 * dpr);
     ctx.stroke();
 
     if (isMajor) {
-      ctx.font = `${8 * dpr}px ui-monospace, monospace`;
+      // Bold, clean monospace font for timing numbers
+      ctx.font = `bold ${9 * dpr}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
       ctx.fillStyle = COLORS.timeLabelMajor;
       ctx.textAlign = 'center';
-      ctx.fillText(formatTime(t), x, height * 0.25);
+      // Time labels sit at the bottom of the time ruler, below the ticks
+      ctx.fillText(formatTime(t), x, trackTop - 2 * dpr);
     }
   }
 }
@@ -338,6 +384,7 @@ function drawKeyframeTicks(
   const minPixelsPerTick = 3 * dpr;
   ctx.strokeStyle = COLORS.keyframe;
   ctx.lineWidth = 1 * dpr;
+  ctx.setLineDash([2 * dpr, 2 * dpr]);
 
   let lastX = -999;
   for (const t of keyframeTimes) {
@@ -357,8 +404,9 @@ function drawKeyframeTicks(
     lastX = x;
 
     ctx.beginPath();
-    ctx.moveTo(x, trackTop + trackH * 0.7);
+    ctx.moveTo(x, trackTop);
     ctx.lineTo(x, trackTop + trackH);
     ctx.stroke();
   }
+  ctx.setLineDash([]);
 }

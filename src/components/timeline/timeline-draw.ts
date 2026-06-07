@@ -371,12 +371,12 @@ function drawClipBlock(
     const segW = ex - sx;
     const segR = Math.min(4 * dpr, segW / 2);
 
-    // Segment fill gradient
+    // Segment fill gradient — selected just brightens the clip's own colour
     const segGrad = ctx.createLinearGradient(sx, actualTrackTop, sx, trackBottom);
     if (isSelected) {
-      segGrad.addColorStop(0, '#c4b5fd'); // violet-300
-      segGrad.addColorStop(0.5, '#8b5cf6'); // violet-500
-      segGrad.addColorStop(1, '#6d28d9'); // violet-700
+      segGrad.addColorStop(0, lighten(color, 55));
+      segGrad.addColorStop(0.55, lighten(color, 30));
+      segGrad.addColorStop(1, color);
     } else if (isActive) {
       segGrad.addColorStop(0, lighten(color, 30));
       segGrad.addColorStop(0.55, color);
@@ -387,40 +387,57 @@ function drawClipBlock(
       segGrad.addColorStop(1, darken(color, 10));
     }
 
-    if (isSelected) {
-      ctx.shadowColor = 'rgba(255, 215, 0, 0.6)';
-      ctx.shadowBlur = 12 * dpr;
-    }
-
     ctx.beginPath();
     ctx.roundRect(sx, actualTrackTop, segW, trackH, segR);
     ctx.fillStyle = segGrad;
     ctx.fill();
 
-    ctx.shadowBlur = 0;
-
-    // Segment border
+    // Segment border — selected: slightly brighter, no ring
     ctx.strokeStyle = isSelected
-      ? '#ffd700'
+      ? withAlpha(lighten(color, 70), 1)
       : isActive
         ? lighten(color, 50)
         : withAlpha(lighten(color, 30), 0.5);
-    ctx.lineWidth = isSelected ? 2.5 * dpr : 1.2 * dpr;
+    ctx.lineWidth = isSelected ? 1.5 * dpr : 1.2 * dpr;
     ctx.beginPath();
     ctx.roundRect(sx, actualTrackTop, segW, trackH, segR);
     ctx.stroke();
 
-    // Segment duration label
-    if (segW > 40 * dpr) {
-      ctx.font = `${10 * dpr}px ui-monospace, monospace`;
-      ctx.fillStyle = isActive ? BASE_COLORS.segmentLabel : 'rgba(255,255,255,0.4)';
+    // Segment label — clip name + duration inside the segment
+    if (segW > 36 * dpr) {
+      const nameAlpha = isActive ? 0.9 : 0.5;
+      const timeAlpha = isActive ? 0.6 : 0.35;
+      const midX = sx + segW / 2;
+      const midY = actualTrackTop + trackH / 2;
+
+      // Truncate name to fit
+      ctx.font = `600 ${9 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+      const maxTw = segW - 10 * dpr;
+      let nameText = label;
+      while (nameText.length > 2 && ctx.measureText(nameText).width > maxTw) {
+        nameText = nameText.slice(0, -1);
+      }
+      if (nameText !== label) nameText = nameText.slice(0, -1) + '…';
+
+      const durText = formatTime(dur);
+
+      // Two-line layout: name above centre, duration below
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.fillText(
-        formatTime(dur),
-        sx + segW / 2,
-        actualTrackTop + trackH / 2
-      );
+
+      // Name
+      ctx.fillStyle = isActive
+        ? withAlpha('#ffffff', nameAlpha)
+        : withAlpha(lighten(color, 60), nameAlpha);
+      ctx.fillText(nameText, midX, midY - 5 * dpr);
+
+      // Duration
+      ctx.font = `${8.5 * dpr}px ui-monospace, monospace`;
+      ctx.fillStyle = isActive
+        ? withAlpha('#ffffff', timeAlpha)
+        : withAlpha(lighten(color, 40), timeAlpha);
+      ctx.fillText(durText, midX, midY + 5.5 * dpr);
+
       ctx.textBaseline = 'alphabetic';
     }
 
@@ -446,33 +463,14 @@ function drawClipBlock(
     ctx.stroke();
   }
 
-  // ── Keyframe ticks (for active clip only, or all clips if >1 segment visible) ──
-  if (isActive) {
-    drawKeyframeTicksForClip(
-      ctx, keyframeTimes, segments, vtStart,
-      viewStart, viewEnd, W, actualTrackTop, trackH, dpr
-    );
-  }
+  // ── Keyframe ticks (all clips, dimmer for inactive) ───────────────────
+  drawKeyframeTicksForClip(
+    ctx, keyframeTimes, segments, vtStart,
+    viewStart, viewEnd, W, actualTrackTop, trackH, dpr,
+    isActive
+  );
 
-  // ── Clip label (filename, centered) ───────────────────────────────────
-  const minWidthForLabel = 50 * dpr;
-  if (clipW > minWidthForLabel) {
-    const labelText = label.length > 24 ? label.slice(0, 22) + '…' : label;
-    ctx.font = `bold ${9 * dpr}px ui-sans-serif, system-ui, sans-serif`;
-    const tw = ctx.measureText(labelText).width;
-
-    // Only draw if it fits reasonably
-    if (tw < clipW - 12 * dpr) {
-      const labelY = actualTrackTop + trackH + 10 * dpr;
-      ctx.fillStyle = isActive
-        ? withAlpha(lighten(color, 40), 0.9)
-        : withAlpha(lighten(color, 10), 0.5);
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillText(labelText, clipX1 + clipW / 2, labelY);
-      ctx.textBaseline = 'alphabetic';
-    }
-  }
+  // (clip name + duration are rendered inside each segment above)
 }
 
 // ── Time ruler ────────────────────────────────────────────────────────────
@@ -529,10 +527,12 @@ function drawKeyframeTicksForClip(
   W: number,
   trackTop: number,
   trackH: number,
-  dpr: number
+  dpr: number,
+  isActive: boolean = true,
 ): void {
   const minPixelsPerTick = 3 * dpr;
-  ctx.strokeStyle = BASE_COLORS.keyframe;
+  // Active clips: normal tick colour; inactive: more transparent
+  ctx.strokeStyle = isActive ? BASE_COLORS.keyframe : 'rgba(255,255,255,0.08)';
   ctx.lineWidth = 1 * dpr;
   ctx.setLineDash([2 * dpr, 2 * dpr]);
 

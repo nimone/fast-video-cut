@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Clock, Film, Plus, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "../ui/badge";
+import { saveFileToOPFS, deleteClipFromOPFS } from "../../lib/opfs";
 
 export interface MediaItem {
   id: string;
@@ -32,7 +33,7 @@ function formatDur(s: number): string {
 }
 
 /** Extract a thumbnail + duration from a video File via an off-screen <video> element. */
-async function extractMeta(file: File): Promise<{ thumbnail: string; duration: number }> {
+export async function extractMeta(file: File): Promise<{ thumbnail: string; duration: number }> {
   return new Promise((resolve, reject) => {
     const video = document.createElement("video");
     video.muted = true;
@@ -328,7 +329,7 @@ export function MediaPanel({
 }
 
 /** Hook to manage media panel items with thumbnail extraction */
-export function useMediaItems() {
+export function useMediaItems(projectId: string | null) {
   const [items, setItems] = useState<MediaItem[]>([]);
 
   const addFiles = useCallback(async (files: FileList | File[]) => {
@@ -344,6 +345,14 @@ export function useMediaItems() {
 
     setItems((prev) => [...prev, ...newItems]);
 
+    if (projectId) {
+      for (const item of newItems) {
+        saveFileToOPFS(projectId, item.id, item.file).catch((err) => {
+          console.error(`Failed to save media item ${item.name} to OPFS:`, err);
+        });
+      }
+    }
+
     // Extract metas in background
     for (const item of newItems) {
       extractMeta(item.file)
@@ -356,7 +365,7 @@ export function useMediaItems() {
           // Leave as null, video might still work
         });
     }
-  }, []);
+  }, [projectId]);
 
   const removeItem = useCallback((id: string) => {
     setItems((prev) => {
@@ -364,7 +373,12 @@ export function useMediaItems() {
       if (item?.thumbnail) URL.revokeObjectURL(item.thumbnail);
       return prev.filter((it) => it.id !== id);
     });
-  }, []);
+    if (projectId) {
+      deleteClipFromOPFS(projectId, id).catch((err) => {
+        console.error(`Failed to delete media item ${id} from OPFS:`, err);
+      });
+    }
+  }, [projectId]);
 
   // Cleanup object URLs on unmount
   useEffect(() => {
@@ -378,5 +392,5 @@ export function useMediaItems() {
     };
   }, []);
 
-  return { items, addFiles, removeItem };
+  return { items, setItems, addFiles, removeItem };
 }

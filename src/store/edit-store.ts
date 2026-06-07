@@ -62,6 +62,8 @@ interface EditStoreState {
   appendClip: (file: File, duration: number, keyframeTimes: number[], fps: number) => string;
   setActiveClipId: (id: string) => void;
   removeClip: (id: string) => void;
+  loadClips: (clips: TrackClip[], activeClipId: string | null) => void;
+  clearClips: () => void;
 
   setCurrentTime: (time: number) => void;
   setHoverTime: (time: number | null, clipId?: string | null) => void;
@@ -248,6 +250,45 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       activeClipId: activeClip.id,
       ...derivedFromClip(activeClip),
       selectedSegmentIndex: null,
+    });
+  },
+
+  loadClips(clips, activeClipId) {
+    const activeClip = clips.find((c) => c.id === activeClipId) || clips[0];
+    if (activeClip) {
+      set({
+        clips,
+        activeClipId: activeClip.id,
+        ...derivedFromClip(activeClip),
+        selectedSegmentIndex: null,
+        currentTime: 0,
+        hoverTime: null,
+        hoverClipId: null,
+        selectionStart: null,
+        selectionEnd: null,
+      });
+    } else {
+      get().clearClips();
+    }
+  },
+
+  clearClips() {
+    set({
+      clips: [],
+      activeClipId: null,
+      file: null,
+      duration: 0,
+      keyframeTimes: [],
+      fps: 30,
+      segments: [],
+      history: [],
+      historyIndex: -1,
+      selectedSegmentIndex: null,
+      currentTime: 0,
+      hoverTime: null,
+      hoverClipId: null,
+      selectionStart: null,
+      selectionEnd: null,
     });
   },
 

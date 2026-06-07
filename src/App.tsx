@@ -6,26 +6,21 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import {
   AlertTriangle,
-  ArrowLeft,
-  ChevronLeft,
-  ChevronRight,
   Download,
   Film,
-  FolderOpen,
   HelpCircle,
   PanelLeftClose,
   PanelLeftOpen,
   PanelRightClose,
   PanelRightOpen,
-  RotateCcw,
-  RotateCw,
   Scissors,
-  Slash,
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CutListPanel } from "./components/editor/cut-list-panel";
+import { EditorToolbar } from "./components/editor/editor-toolbar";
 import { ExportDialog } from "./components/editor/export-dialog";
-import { MediaPanel, useMediaItems } from "./components/editor/media-panel";
+import { MediaPanel, useMediaItems, extractMeta } from "./components/editor/media-panel";
+import type { MediaItem } from "./components/editor/media-panel";
 import { PlayerPanel } from "./components/editor/player";
 import { ProjectsHome } from "./components/home/projects-home";
 import { ShortcutHelp } from "./components/info/shortcut-help";
@@ -34,9 +29,11 @@ import { registerKeymap } from "./keymap/keys";
 import { Player } from "./media/player";
 import { probeFile } from "./media/probe";
 import { useEditStore } from "./store/edit-store";
+import type { TrackClip } from "./store/edit-store";
 import { useKeymapStore } from "./store/keymap-store";
 import type { ProjectStore } from "./store/project-store";
 import { useProjectStore } from "./store/project-store";
+import { saveFileToOPFS, loadFileFromOPFS } from "./lib/opfs";
 
 function formatDuration(s: number): string {
   const m = Math.floor(s / 60);
@@ -77,7 +74,7 @@ function Editor({
   const [player, setPlayer] = useState<Player | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   // Track which clip is being dragged from media panel, and whether it's over the timeline
@@ -89,9 +86,12 @@ function Editor({
 
   const {
     items: mediaItems,
+    setItems: setMediaItems,
     addFiles: addMediaFiles,
     removeItem: removeMediaItem,
-  } = useMediaItems();
+  } = useMediaItems(projectId);
+
+  const loadedFileRef = useRef<File | null>(null);
   const [probeInfo, setProbeInfo] = useState<{
     fps: number;
     width: number;
@@ -104,39 +104,246 @@ function Editor({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<Player | null>(null);
 
-  const {
-    file,
-    duration,
-    segments,
-    keyframeTimes,
-    fps,
-    clips,
-    canUndo,
-    canRedo,
-    undo,
-    redo,
-    cutAtCursor,
-    trimLeft,
-    trimRight,
-    deleteSelection,
-    selectionStart,
-    initFile,
-    appendClip,
-  } = useEditStore();
+  const { file, duration, segments, keyframeTimes, fps, clips, activeClipId, initFile, appendClip } =
+    useEditStore();
 
-  // Auto-save edit state to project store whenever segments/duration change
+  // Auto-save edit state and media items to project store
   useEffect(() => {
-    if (!projectId || !duration) return;
+    if (!projectId || loading) return;
+
+    const savedClips = clips.map((clip) => ({
+      id: clip.id,
+      fileName: clip.file.name,
+      fileSize: clip.file.size,
+      fileType: clip.file.type,
+      duration: clip.duration,
+      keyframeTimes: clip.keyframeTimes,
+      fps: clip.fps,
+      segments: clip.segments,
+      history: clip.history,
+      historyIndex: clip.historyIndex,
+      color: clip.color,
+    }));
+
+    const savedMediaItems = mediaItems.map((item) => ({
+      id: item.id,
+      name: item.name,
+      size: item.file.size,
+      type: item.file.type,
+      duration: item.duration,
+    }));
+
     saveProjectState(projectId, {
       segments,
       duration,
       keyframeTimes,
       fps,
       segmentCount: segments.length,
-      mediaFileNames: file ? [file.name] : [],
+      mediaFileNames: file ? [file.name] : clips.map((c) => c.file.name),
+      clips: savedClips,
+      activeClipId,
+      mediaItems: savedMediaItems,
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segments, duration]);
+  }, [
+    projectId,
+    clips,
+    activeClipId,
+    mediaItems,
+    segments,
+    duration,
+    keyframeTimes,
+    fps,
+    file,
+    loading,
+    saveProjectState,
+  ]);
+
+  // Load/Restore project from OPFS on mount or projectId change
+  useEffect(() => {
+    if (!projectId) return;
+
+    let active = true;
+
+    async function restoreProject() {
+      setLoading(true);
+      setLoadError(null);
+
+      // Dispose previous player
+      if (playerRef.current) {
+        playerRef.current.dispose();
+        playerRef.current = null;
+        setPlayer(null);
+      }
+      loadedFileRef.current = null;
+
+      const projects = useProjectStore.getState().projects;
+      const project = projects.find((p) => p.id === projectId);
+      if (!project) {
+        if (active) setLoading(false);
+        return;
+      }
+
+      try {
+        // 1. Restore Media Panel Items
+        const restoredMediaItems: MediaItem[] = [];
+        if (project.mediaItems && project.mediaItems.length > 0) {
+          for (const itemMeta of project.mediaItems) {
+            try {
+              const file = await loadFileFromOPFS(projectId, itemMeta.id, itemMeta.name, itemMeta.type);
+              restoredMediaItems.push({
+                id: itemMeta.id,
+                file,
+                name: itemMeta.name,
+                duration: itemMeta.duration,
+                thumbnail: null,
+              });
+            } catch (err) {
+              console.error(`Failed to load media file ${itemMeta.name} from OPFS:`, err);
+            }
+          }
+        }
+
+        // 2. Restore Timeline Clips
+        const restoredClips: TrackClip[] = [];
+        if (project.clips && project.clips.length > 0) {
+          for (const clipMeta of project.clips) {
+            try {
+              const file = await loadFileFromOPFS(projectId, clipMeta.id, clipMeta.fileName, clipMeta.fileType);
+              restoredClips.push({
+                id: clipMeta.id,
+                file,
+                duration: clipMeta.duration,
+                keyframeTimes: clipMeta.keyframeTimes,
+                fps: clipMeta.fps,
+                segments: clipMeta.segments,
+                history: clipMeta.history,
+                historyIndex: clipMeta.historyIndex,
+                color: clipMeta.color,
+              });
+            } catch (err) {
+              console.error(`Failed to load clip file ${clipMeta.fileName} from OPFS:`, err);
+            }
+          }
+        }
+
+        if (!active) return;
+
+        // Set media panel items
+        setMediaItems(restoredMediaItems);
+
+        // Background extract thumbnails
+        for (const item of restoredMediaItems) {
+          extractMeta(item.file)
+            .then(({ thumbnail, duration }) => {
+              setMediaItems((prev) =>
+                prev.map((it) => (it.id === item.id ? { ...it, thumbnail, duration } : it))
+              );
+            })
+            .catch(() => {});
+        }
+
+        // Load timeline clips in edit store
+        if (restoredClips.length > 0) {
+          useEditStore.getState().loadClips(restoredClips, project.activeClipId ?? null);
+          // The file useEffect will handle creating the player and setting loading to false.
+        } else {
+          // No clips saved, reset the edit-store
+          useEditStore.getState().clearClips();
+          if (active) setLoading(false);
+        }
+      } catch (err: unknown) {
+        if (active) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setLoadError(`Failed to load project: ${msg}`);
+          setLoading(false);
+        }
+      }
+    }
+
+    restoreProject();
+
+    return () => {
+      active = false;
+    };
+  }, [projectId, setMediaItems]);
+
+  // Recreate player when active clip's file changes (switching active clip or loading)
+  useEffect(() => {
+    if (!file) {
+      if (playerRef.current) {
+        playerRef.current.dispose();
+        playerRef.current = null;
+        setPlayer(null);
+        loadedFileRef.current = null;
+      }
+      return;
+    }
+
+    if (loadedFileRef.current === file) {
+      return; // Already loaded/loading this exact file object reference
+    }
+
+    let active = true;
+    async function switchPlayer() {
+      setLoading(true);
+      setLoadError(null);
+
+      if (playerRef.current) {
+        playerRef.current.dispose();
+        playerRef.current = null;
+        setPlayer(null);
+      }
+
+      try {
+        const probe = await probeFile(file);
+        if (!active) return;
+
+        // Compute keyframe interval
+        const kfTimes = probe.keyframeTimes;
+        const kfInterval =
+          kfTimes.length >= 2
+            ? (kfTimes[kfTimes.length - 1] - kfTimes[0]) / (kfTimes.length - 1)
+            : 0;
+
+        setProbeInfo({
+          fps: probe.fps,
+          width: probe.width,
+          height: probe.height,
+          formatName: probe.formatName,
+          videoCodecString: probe.videoCodecString,
+          keyframeInterval: kfInterval,
+        });
+
+        const input = probe.input;
+        const videoTrack = await input.getPrimaryVideoTrack();
+        const audioTrack = await input.getPrimaryAudioTrack();
+
+        if (!videoTrack) throw new Error("No video track found.");
+
+        const p = new Player(input, videoTrack, audioTrack, probe.duration);
+        playerRef.current = p;
+        setPlayer(p);
+        loadedFileRef.current = file;
+
+        await p.seekTo(0);
+      } catch (err: unknown) {
+        if (active) {
+          const msg = err instanceof Error ? err.message : String(err);
+          setLoadError(`Failed to load video: ${msg}`);
+        }
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    }
+
+    switchPlayer();
+
+    return () => {
+      active = false;
+    };
+  }, [file]);
 
   // Register keyboard shortcuts
   useEffect(() => {
@@ -155,56 +362,22 @@ function Editor({
     async (f: File) => {
       setLoading(true);
       setLoadError(null);
-
-      // Dispose previous player
-      if (playerRef.current) {
-        playerRef.current.dispose();
-        playerRef.current = null;
-        setPlayer(null);
-      }
-
       try {
         const probe = await probeFile(f);
-
-        // Compute keyframe interval
-        const kfTimes = probe.keyframeTimes;
-        const kfInterval =
-          kfTimes.length >= 2
-            ? (kfTimes[kfTimes.length - 1] - kfTimes[0]) / (kfTimes.length - 1)
-            : 0;
-
-        setProbeInfo({
-          fps: probe.fps,
-          width: probe.width,
-          height: probe.height,
-          formatName: probe.formatName,
-          videoCodecString: probe.videoCodecString,
-          keyframeInterval: kfInterval,
-        });
-
         initFile(f, probe.duration, probe.keyframeTimes, probe.fps);
-
-        // Create player
-        const input = probe.input;
-        const videoTrack = await input.getPrimaryVideoTrack();
-        const audioTrack = await input.getPrimaryAudioTrack();
-
-        if (!videoTrack) throw new Error("No video track found.");
-
-        const p = new Player(input, videoTrack, audioTrack, probe.duration);
-        playerRef.current = p;
-        setPlayer(p);
-
-        // Seek to first frame
-        await p.seekTo(0);
+        if (projectId) {
+          const newActiveClipId = useEditStore.getState().activeClipId;
+          if (newActiveClipId) {
+            await saveFileToOPFS(projectId, newActiveClipId, f);
+          }
+        }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         setLoadError(msg);
-      } finally {
         setLoading(false);
       }
     },
-    [initFile],
+    [initFile, projectId],
   );
 
   /** Append a clip to the track (does NOT reset existing clips) */
@@ -214,15 +387,17 @@ function Editor({
       setLoadError(null);
       try {
         const probe = await probeFile(f);
-        appendClip(f, probe.duration, probe.keyframeTimes, probe.fps);
+        const newClipId = appendClip(f, probe.duration, probe.keyframeTimes, probe.fps);
+        if (projectId) {
+          await saveFileToOPFS(projectId, newClipId, f);
+        }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
         setLoadError(msg);
-      } finally {
         setLoading(false);
       }
     },
-    [appendClip],
+    [appendClip, projectId],
   );
 
   // Global drag and drop (external files onto the app)
@@ -333,7 +508,7 @@ function Editor({
       {/* Top navbar */}
       <header className="flex items-center gap-3 px-4 h-12 bg-card border-b border-border shrink-0">
         {/* Back to projects */}
-        <Button
+        {/* <Button
           id="btn-back-to-projects"
           variant="ghost"
           size="icon-sm"
@@ -343,7 +518,7 @@ function Editor({
           <ArrowLeft />
         </Button>
 
-        <div className="h-4 w-px bg-border" />
+        <div className="h-4 w-px bg-border" /> */}
 
         {/* Logo + project name */}
         <div className="flex items-center gap-2 mr-1">
@@ -356,20 +531,6 @@ function Editor({
             {projectName}
           </span>
         </div>
-
-        <div className="h-4 w-px bg-border" />
-
-        {/* Open file */}
-        <Button
-          id="btn-open-file"
-          variant="ghost"
-          size="sm"
-          onClick={() => fileInputRef.current?.click()}
-          title="Open file (Ctrl+O)"
-        >
-          <FolderOpen />
-          Open
-        </Button>
 
         {/* File info */}
         {file && (
@@ -522,80 +683,7 @@ function Editor({
             </div>
 
             {/* Toolbar above timeline */}
-            <div className="flex items-center gap-1 px-3 h-9 shrink-0 border-t border-border bg-card/60">
-              <Button
-                id="btn-cut"
-                variant="secondary"
-                size="sm"
-                onClick={() => cutAtCursor()}
-                disabled={!file}
-                title="Cut at cursor (S)"
-              >
-                <Scissors />
-                Cut
-              </Button>
-
-              <Button
-                id="btn-trim-left"
-                variant="secondary"
-                size="sm"
-                onClick={() => trimLeft()}
-                disabled={!file}
-                title="Trim left (A)"
-              >
-                <ChevronLeft />
-                Trim L
-              </Button>
-
-              <Button
-                id="btn-trim-right"
-                variant="secondary"
-                size="sm"
-                onClick={() => trimRight()}
-                disabled={!file}
-                title="Trim right (D)"
-              >
-                <ChevronRight />
-                Trim R
-              </Button>
-
-              {selectionStart !== null && (
-                <Button
-                  id="btn-delete-selection"
-                  variant="destructive-outline"
-                  size="sm"
-                  onClick={deleteSelection}
-                  title="Delete selection (Del)"
-                >
-                  <Slash />
-                  Delete
-                </Button>
-              )}
-
-              <div className="h-4 w-px bg-border mx-1" />
-
-              <Button
-                id="btn-undo"
-                variant="ghost"
-                size="icon-sm"
-                onClick={undo}
-                disabled={!canUndo()}
-                title="Undo (Ctrl+Z)"
-              >
-                <RotateCcw />
-              </Button>
-
-              <Button
-                id="btn-redo"
-                variant="ghost"
-                size="icon-sm"
-                onClick={redo}
-                disabled={!canRedo()}
-                title="Redo (Ctrl+Shift+Z)"
-              >
-                <RotateCw />
-              </Button>
-            </div>
+            <EditorToolbar />
 
             {/* Full-width Timeline */}
             <div

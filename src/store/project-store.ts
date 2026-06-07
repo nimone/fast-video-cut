@@ -1,8 +1,28 @@
-// src/store/project-store.ts
-// Project management: CRUD + localStorage persistence.
-
 import { create } from 'zustand';
 import type { Segment } from './edit-store';
+import { deleteProjectFromOPFS } from '../lib/opfs';
+
+export interface SavedClipMeta {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  fileType: string;
+  duration: number;
+  keyframeTimes: number[];
+  fps: number;
+  segments: Segment[];
+  history: Segment[][];
+  historyIndex: number;
+  color: string;
+}
+
+export interface SavedMediaItemMeta {
+  id: string;
+  name: string;
+  size: number;
+  type: string;
+  duration: number | null;
+}
 
 export interface ProjectMeta {
   id: string;
@@ -18,6 +38,11 @@ export interface ProjectMeta {
   mediaFileNames: string[];
   // Segment count for the card preview
   segmentCount: number;
+
+  // New persistent fields:
+  clips?: SavedClipMeta[];
+  activeClipId?: string | null;
+  mediaItems?: SavedMediaItemMeta[];
 }
 
 export interface ProjectStore {
@@ -32,7 +57,7 @@ export interface ProjectStore {
   closeProject: () => void;
   saveProjectState: (
     id: string,
-    patch: Partial<Pick<ProjectMeta, 'segments' | 'duration' | 'keyframeTimes' | 'fps' | 'mediaFileNames' | 'segmentCount'>>
+    patch: Partial<Pick<ProjectMeta, 'segments' | 'duration' | 'keyframeTimes' | 'fps' | 'mediaFileNames' | 'segmentCount' | 'clips' | 'activeClipId' | 'mediaItems'>>
   ) => void;
 
   activeProject: () => ProjectMeta | null;
@@ -90,6 +115,9 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       projects,
       activeProjectId: s.activeProjectId === id ? null : s.activeProjectId,
     }));
+    deleteProjectFromOPFS(id).catch((err) => {
+      console.error(`Failed to delete project ${id} files from OPFS:`, err);
+    });
   },
 
   renameProject(id, name) {

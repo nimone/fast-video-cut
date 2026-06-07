@@ -1,9 +1,10 @@
 // src/components/editor/media-panel.tsx
 // Left side panel: import videos and drag them onto the timeline.
 
-import { useRef, useState, useCallback, useEffect } from 'react';
-import { Film, Plus, X, Upload, Clock } from 'lucide-react';
-import { Button } from '@/components/ui/button';
+import { Button } from "@/components/ui/button";
+import { Clock, Film, Plus, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Badge } from "../ui/badge";
 
 export interface MediaItem {
   id: string;
@@ -27,17 +28,15 @@ interface MediaPanelProps {
 function formatDur(s: number): string {
   const m = Math.floor(s / 60);
   const sec = Math.floor(s % 60);
-  return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+  return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
 }
 
 /** Extract a thumbnail + duration from a video File via an off-screen <video> element. */
-async function extractMeta(
-  file: File
-): Promise<{ thumbnail: string; duration: number }> {
+async function extractMeta(file: File): Promise<{ thumbnail: string; duration: number }> {
   return new Promise((resolve, reject) => {
-    const video = document.createElement('video');
+    const video = document.createElement("video");
     video.muted = true;
-    video.preload = 'metadata';
+    video.preload = "metadata";
     const src = URL.createObjectURL(file);
     video.src = src;
 
@@ -46,12 +45,12 @@ async function extractMeta(
     };
 
     video.onseeked = () => {
-      const canvas = document.createElement('canvas');
+      const canvas = document.createElement("canvas");
       const THUMB_W = 160;
       const THUMB_H = 90;
       canvas.width = THUMB_W;
       canvas.height = THUMB_H;
-      const ctx = canvas.getContext('2d');
+      const ctx = canvas.getContext("2d");
       if (ctx) {
         ctx.drawImage(video, 0, 0, THUMB_W, THUMB_H);
         canvas.toBlob(
@@ -60,21 +59,21 @@ async function extractMeta(
             if (blob) {
               resolve({ thumbnail: URL.createObjectURL(blob), duration: video.duration });
             } else {
-              reject(new Error('Could not generate thumbnail blob'));
+              reject(new Error("Could not generate thumbnail blob"));
             }
           },
-          'image/jpeg',
-          0.7
+          "image/jpeg",
+          0.7,
         );
       } else {
         URL.revokeObjectURL(src);
-        reject(new Error('No 2D context'));
+        reject(new Error("No 2D context"));
       }
     };
 
     video.onerror = () => {
       URL.revokeObjectURL(src);
-      reject(new Error('Video load error'));
+      reject(new Error("Video load error"));
     };
   });
 }
@@ -94,16 +93,17 @@ function ClipCard({
     <div
       draggable
       onDragStart={(e) => {
-        e.dataTransfer.effectAllowed = 'copy';
-        e.dataTransfer.setData('text/plain', item.id);
+        e.dataTransfer.effectAllowed = "copy";
+        e.dataTransfer.setData("text/plain", item.id);
         onDragStart();
       }}
       className={`
         group relative rounded-lg overflow-hidden border cursor-grab active:cursor-grabbing
         transition-all duration-150 select-none
-        ${isActive
-          ? 'border-primary/60 shadow-md shadow-primary/20 ring-1 ring-primary/40'
-          : 'border-border hover:border-border/80 hover:shadow-sm'
+        ${
+          isActive
+            ? "border-primary/60 shadow-md shadow-primary/20 ring-1 ring-primary/40"
+            : "border-border hover:border-border/80 hover:shadow-sm"
         }
         bg-card
       `}
@@ -153,7 +153,7 @@ function ClipCard({
             e.stopPropagation();
             onRemove();
           }}
-          className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0 rounded p-0.5 hover:bg-destructive/15 text-muted-foreground hover:text-destructive"
+          className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 rounded p-0.5 hover:bg-destructive/15 text-muted-foreground hover:text-destructive"
           title="Remove from panel"
         >
           <X className="size-3" />
@@ -183,19 +183,19 @@ export function MediaPanel({
       const files = e.dataTransfer.files;
       if (files.length > 0) onAddFiles(files);
     },
-    [onAddFiles]
+    [onAddFiles],
   );
 
   const handlePanelDragOver = (e: React.DragEvent) => {
     // Only show panel-drop if it's an external file (has Files type), not an internal clip drag
-    if (e.dataTransfer.types.includes('Files')) {
+    if (e.dataTransfer.types.includes("Files")) {
       e.preventDefault();
       e.stopPropagation();
     }
   };
 
   const handlePanelDragEnter = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('Files')) {
+    if (e.dataTransfer.types.includes("Files")) {
       e.preventDefault();
       e.stopPropagation();
       dragCounterRef.current++;
@@ -204,7 +204,7 @@ export function MediaPanel({
   };
 
   const handlePanelDragLeave = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('Files')) {
+    if (e.dataTransfer.types.includes("Files")) {
       e.preventDefault();
       dragCounterRef.current--;
       if (dragCounterRef.current <= 0) {
@@ -233,32 +233,25 @@ export function MediaPanel({
           if (e.target.files && e.target.files.length > 0) {
             onAddFiles(e.target.files);
           }
-          e.target.value = '';
+          e.target.value = "";
         }}
       />
 
       {/* Header */}
-      <div className="flex items-center justify-between px-3 py-2.5 border-b border-border flex-shrink-0">
+      <div className="flex items-center justify-between px-2 py-1 border-b border-border shrink-0">
         <div className="flex items-center gap-2">
-          <Film className="size-3.5 text-primary" />
-          <span className="text-xs font-semibold text-foreground/80 tracking-wide uppercase">
-            Media
-          </span>
-          {items.length > 0 && (
-            <span className="text-[10px] font-mono bg-primary/10 text-primary/80 rounded px-1.5 py-0.5 leading-none">
-              {items.length}
-            </span>
-          )}
+          <Film className="size-4 text-primary" />
+          <span className="text-sm font-semibold">Media</span>
+          {items.length > 0 && <Badge variant="outline">{items.length}</Badge>}
         </div>
         <Button
           id="btn-media-add"
-          variant="ghost"
+          variant="outline"
           size="icon-sm"
           onClick={() => fileInputRef.current?.click()}
           title="Add video files"
-          className="size-6"
         >
-          <Plus className="size-3.5" />
+          <Plus className="size-4" />
         </Button>
       </div>
 
@@ -271,25 +264,30 @@ export function MediaPanel({
             className={`
               flex flex-col items-center justify-center h-full min-h-32 rounded-xl border-2 border-dashed
               cursor-pointer transition-all duration-200 gap-3 px-3 text-center
-              ${isPanelDragOver
-                ? 'border-primary bg-primary/8 scale-[0.98]'
-                : 'border-border/50 hover:border-border hover:bg-muted/30'
+              ${
+                isPanelDragOver
+                  ? "border-primary bg-primary/8 scale-[0.98]"
+                  : "border-border/50 hover:border-border hover:bg-muted/30"
               }
             `}
           >
-            <div className={`
+            <div
+              className={`
               rounded-xl p-3 transition-colors duration-200
-              ${isPanelDragOver ? 'bg-primary/15' : 'bg-muted/50'}
-            `}>
-              <Upload className={`size-5 transition-colors ${isPanelDragOver ? 'text-primary' : 'text-muted-foreground/50'}`} />
+              ${isPanelDragOver ? "bg-primary/15" : "bg-muted/50"}
+            `}
+            >
+              <Upload
+                className={`size-5 transition-colors ${isPanelDragOver ? "text-primary" : "text-muted-foreground/50"}`}
+              />
             </div>
             <div>
-              <p className={`text-xs font-medium transition-colors ${isPanelDragOver ? 'text-primary' : 'text-muted-foreground/70'}`}>
-                {isPanelDragOver ? 'Release to add' : 'Add videos'}
+              <p
+                className={`text-xs font-medium transition-colors ${isPanelDragOver ? "text-primary" : "text-muted-foreground/70"}`}
+              >
+                {isPanelDragOver ? "Release to add" : "Add videos"}
               </p>
-              <p className="text-[10px] text-muted-foreground/40 mt-0.5">
-                click or drag here
-              </p>
+              <p className="text-[10px] text-muted-foreground/40 mt-0.5">click or drag here</p>
             </div>
           </div>
         ) : (
@@ -351,7 +349,7 @@ export function useMediaItems() {
       extractMeta(item.file)
         .then(({ thumbnail, duration }) => {
           setItems((prev) =>
-            prev.map((it) => (it.id === item.id ? { ...it, thumbnail, duration } : it))
+            prev.map((it) => (it.id === item.id ? { ...it, thumbnail, duration } : it)),
           );
         })
         .catch(() => {

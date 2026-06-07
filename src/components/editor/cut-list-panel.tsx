@@ -1,9 +1,17 @@
-import { Trash2, Clock, ArrowUp, ArrowDown } from 'lucide-react';
-import { useEditStore } from '../../store/edit-store';
-import type { Player } from '../../media/player';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  ArrowDown,
+  ArrowRightIcon,
+  ArrowUp,
+  CheckIcon,
+  Clock,
+  ScissorsIcon,
+  Trash2,
+} from "lucide-react";
+import type { Player } from "../../media/player";
+import { useEditStore } from "../../store/edit-store";
 
 interface CutListPanelProps {
   player: Player | null;
@@ -12,7 +20,7 @@ interface CutListPanelProps {
 function formatTime(s: number): string {
   const m = Math.floor(s / 60);
   const sec = s % 60;
-  return `${String(m).padStart(2, '0')}:${sec.toFixed(2).padStart(5, '0')}`;
+  return `${String(m).padStart(2, "0")}:${sec.toFixed(2).padStart(5, "0")}`;
 }
 
 export function CutListPanel({ player }: CutListPanelProps) {
@@ -30,18 +38,18 @@ export function CutListPanel({ player }: CutListPanelProps) {
   const totalRemoved = duration - totalKept;
 
   return (
-    <Card className="flex flex-col h-full overflow-hidden border border-border">
-      <CardHeader className="border-b border-border p-4">
+    <Card className="flex flex-col h-full overflow-hidden border-0 rounded-none!">
+      <CardHeader className="flex justify-between items-center border-0 px-3 py-2! border-b">
         <CardTitle className="text-sm font-semibold">Cut List</CardTitle>
-        <div className="flex gap-4 mt-1 text-xs text-muted-foreground">
-          <span>
-            <span className="text-success">↑ </span>
-            kept {formatTime(totalKept)}
+        <div className="flex gap-2 text-xs text-muted-foreground">
+          <span className="flex gap-1 items-center">
+            <CheckIcon className="size-3" />
+            {formatTime(totalKept)}
           </span>
           {totalRemoved > 0.01 && (
-            <span>
-              <span className="text-destructive">✂ </span>
-              removed {formatTime(totalRemoved)}
+            <span className="flex gap-1 items-center">
+              <ScissorsIcon className="size-3" />
+              {formatTime(totalRemoved)}
             </span>
           )}
         </div>
@@ -62,8 +70,10 @@ export function CutListPanel({ player }: CutListPanelProps) {
                   <li
                     key={i}
                     id={`segment-${i}`}
-                    className={`flex items-center gap-2 px-3 py-2.5 hover:bg-accent/50 transition-colors group cursor-pointer ${
-                      isSelected ? 'bg-primary/10 border-l-2 border-l-primary' : 'border-l-2 border-l-transparent'
+                    className={`flex items-center gap-2 p-2 hover:bg-accent/50 transition-colors group cursor-pointer ${
+                      isSelected
+                        ? "bg-primary/10 border-l-2 border-l-primary"
+                        : "border-l-2 border-l-transparent"
                     }`}
                     onClick={() => {
                       setCurrentTime(seg.start);
@@ -72,17 +82,21 @@ export function CutListPanel({ player }: CutListPanelProps) {
                     }}
                   >
                     {/* Segment color indicator */}
-                    <div className={`w-1.5 h-8 rounded-full flex-shrink-0 ${isSelected ? 'bg-amber-500' : 'bg-primary'}`} />
+                    <div
+                      className={`w-1 h-8 rounded-full shrink-0 ${isSelected ? "bg-amber-500" : "bg-primary"}`}
+                    />
 
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 text-xs font-mono">
+                      <div className="flex items-center gap-1 text-xs font-mono">
                         <span className="text-foreground/80">{formatTime(seg.start)}</span>
-                        <span className="text-muted-foreground/30">→</span>
+                        <span className="text-muted-foreground">
+                          <ArrowRightIcon className="size-3" />
+                        </span>
                         <span className="text-foreground/80">{formatTime(seg.end)}</span>
                       </div>
                       <div className="flex items-center gap-1 mt-0.5">
-                        <Clock className="size-3 text-muted-foreground/50" />
-                        <span className="text-[10px] text-muted-foreground/50 font-mono">
+                        <Clock className="size-3 text-muted-foreground/60" />
+                        <span className="text-[10px] text-muted-foreground/60 font-mono">
                           {formatTime(dur)}
                         </span>
                       </div>
@@ -90,7 +104,7 @@ export function CutListPanel({ player }: CutListPanelProps) {
 
                     {/* Actions */}
                     <div
-                      className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 focus-within:opacity-100 data-[selected=true]:opacity-100 transition-all"
+                      className="flex items-center opacity-0 group-hover:opacity-100 focus-within:opacity-100 data-[selected=true]:opacity-100 transition-all"
                       data-selected={isSelected}
                     >
                       {i > 0 && (
@@ -99,7 +113,7 @@ export function CutListPanel({ player }: CutListPanelProps) {
                           size="icon-xs"
                           onClick={(e) => {
                             e.stopPropagation();
-                            moveSegment(i, 'left');
+                            moveSegment(i, "left");
                           }}
                           className="text-muted-foreground/65 hover:text-primary transition-all"
                           title="Move up"
@@ -113,7 +127,7 @@ export function CutListPanel({ player }: CutListPanelProps) {
                           size="icon-xs"
                           onClick={(e) => {
                             e.stopPropagation();
-                            moveSegment(i, 'right');
+                            moveSegment(i, "right");
                           }}
                           className="text-muted-foreground/65 hover:text-primary transition-all"
                           title="Move down"

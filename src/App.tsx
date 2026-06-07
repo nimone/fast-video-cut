@@ -1,35 +1,47 @@
 // src/App.tsx
 // Main application shell.
 
-import { useEffect, useRef, useState, useCallback } from 'react';
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Spinner } from "@/components/ui/spinner";
 import {
-  Scissors, Download, HelpCircle, FolderOpen, RotateCcw, RotateCw,
-  Slash, ChevronLeft, ChevronRight, Film, AlertTriangle,
-  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
+  AlertTriangle,
   ArrowLeft,
-} from 'lucide-react';
-import { Timeline } from './components/timeline/timeline';
-import { PlayerPanel } from './components/editor/player';
-import { CutListPanel } from './components/editor/cut-list-panel';
-import { MediaPanel, useMediaItems } from './components/editor/media-panel';
-import { ExportDialog } from './components/editor/export-dialog';
-import { ShortcutHelp } from './components/info/shortcut-help';
-import { ProjectsHome } from './components/home/projects-home';
-import { probeFile } from './media/probe';
-import { Player } from './media/player';
-import { useEditStore } from './store/edit-store';
-import { useKeymapStore } from './store/keymap-store';
-import { useProjectStore } from './store/project-store';
-import type { ProjectStore } from './store/project-store';
-import { registerKeymap } from './keymap/keys';
-import { Button } from '@/components/ui/button';
-import { Badge } from '@/components/ui/badge';
-import { Spinner } from '@/components/ui/spinner';
+  ChevronLeft,
+  ChevronRight,
+  Download,
+  Film,
+  FolderOpen,
+  HelpCircle,
+  PanelLeftClose,
+  PanelLeftOpen,
+  PanelRightClose,
+  PanelRightOpen,
+  RotateCcw,
+  RotateCw,
+  Scissors,
+  Slash,
+} from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { CutListPanel } from "./components/editor/cut-list-panel";
+import { ExportDialog } from "./components/editor/export-dialog";
+import { MediaPanel, useMediaItems } from "./components/editor/media-panel";
+import { PlayerPanel } from "./components/editor/player";
+import { ProjectsHome } from "./components/home/projects-home";
+import { ShortcutHelp } from "./components/info/shortcut-help";
+import { Timeline } from "./components/timeline/timeline";
+import { registerKeymap } from "./keymap/keys";
+import { Player } from "./media/player";
+import { probeFile } from "./media/probe";
+import { useEditStore } from "./store/edit-store";
+import { useKeymapStore } from "./store/keymap-store";
+import type { ProjectStore } from "./store/project-store";
+import { useProjectStore } from "./store/project-store";
 
 function formatDuration(s: number): string {
   const m = Math.floor(s / 60);
   const sec = s % 60;
-  return `${String(m).padStart(2, '0')}:${sec.toFixed(1).padStart(4, '0')}`;
+  return `${String(m).padStart(2, "0")}:${sec.toFixed(1).padStart(4, "0")}`;
 }
 
 export default function App() {
@@ -41,7 +53,14 @@ export default function App() {
     return <ProjectsHome />;
   }
 
-  return <Editor projectId={activeProjectId} projectName={currentProject?.name ?? ''} onClose={closeProject} saveProjectState={saveProjectState} />;
+  return (
+    <Editor
+      projectId={activeProjectId}
+      projectName={currentProject?.name ?? ""}
+      onClose={closeProject}
+      saveProjectState={saveProjectState}
+    />
+  );
 }
 
 function Editor({
@@ -53,7 +72,7 @@ function Editor({
   projectId: string;
   projectName: string;
   onClose: () => void;
-  saveProjectState: ProjectStore['saveProjectState'];
+  saveProjectState: ProjectStore["saveProjectState"];
 }) {
   const [player, setPlayer] = useState<Player | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
@@ -68,7 +87,11 @@ function Editor({
   const [mediaPanelOpen, setMediaPanelOpen] = useState(true);
   const [cutListOpen, setCutListOpen] = useState(true);
 
-  const { items: mediaItems, addFiles: addMediaFiles, removeItem: removeMediaItem } = useMediaItems();
+  const {
+    items: mediaItems,
+    addFiles: addMediaFiles,
+    removeItem: removeMediaItem,
+  } = useMediaItems();
   const [probeInfo, setProbeInfo] = useState<{
     fps: number;
     width: number;
@@ -112,7 +135,7 @@ function Editor({
       segmentCount: segments.length,
       mediaFileNames: file ? [file.name] : [],
     });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segments, duration]);
 
   // Register keyboard shortcuts
@@ -128,73 +151,79 @@ function Editor({
     return cleanup;
   }, []);
 
-  const loadFile = useCallback(async (f: File) => {
-    setLoading(true);
-    setLoadError(null);
+  const loadFile = useCallback(
+    async (f: File) => {
+      setLoading(true);
+      setLoadError(null);
 
-    // Dispose previous player
-    if (playerRef.current) {
-      playerRef.current.dispose();
-      playerRef.current = null;
-      setPlayer(null);
-    }
+      // Dispose previous player
+      if (playerRef.current) {
+        playerRef.current.dispose();
+        playerRef.current = null;
+        setPlayer(null);
+      }
 
-    try {
-      const probe = await probeFile(f);
+      try {
+        const probe = await probeFile(f);
 
-      // Compute keyframe interval
-      const kfTimes = probe.keyframeTimes;
-      const kfInterval =
-        kfTimes.length >= 2
-          ? (kfTimes[kfTimes.length - 1] - kfTimes[0]) / (kfTimes.length - 1)
-          : 0;
+        // Compute keyframe interval
+        const kfTimes = probe.keyframeTimes;
+        const kfInterval =
+          kfTimes.length >= 2
+            ? (kfTimes[kfTimes.length - 1] - kfTimes[0]) / (kfTimes.length - 1)
+            : 0;
 
-      setProbeInfo({
-        fps: probe.fps,
-        width: probe.width,
-        height: probe.height,
-        formatName: probe.formatName,
-        videoCodecString: probe.videoCodecString,
-        keyframeInterval: kfInterval,
-      });
+        setProbeInfo({
+          fps: probe.fps,
+          width: probe.width,
+          height: probe.height,
+          formatName: probe.formatName,
+          videoCodecString: probe.videoCodecString,
+          keyframeInterval: kfInterval,
+        });
 
-      initFile(f, probe.duration, probe.keyframeTimes, probe.fps);
+        initFile(f, probe.duration, probe.keyframeTimes, probe.fps);
 
-      // Create player
-      const input = probe.input;
-      const videoTrack = await input.getPrimaryVideoTrack();
-      const audioTrack = await input.getPrimaryAudioTrack();
+        // Create player
+        const input = probe.input;
+        const videoTrack = await input.getPrimaryVideoTrack();
+        const audioTrack = await input.getPrimaryAudioTrack();
 
-      if (!videoTrack) throw new Error('No video track found.');
+        if (!videoTrack) throw new Error("No video track found.");
 
-      const p = new Player(input, videoTrack, audioTrack, probe.duration);
-      playerRef.current = p;
-      setPlayer(p);
+        const p = new Player(input, videoTrack, audioTrack, probe.duration);
+        playerRef.current = p;
+        setPlayer(p);
 
-      // Seek to first frame
-      await p.seekTo(0);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setLoadError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [initFile]);
+        // Seek to first frame
+        await p.seekTo(0);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setLoadError(msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [initFile],
+  );
 
   /** Append a clip to the track (does NOT reset existing clips) */
-  const appendFile = useCallback(async (f: File) => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const probe = await probeFile(f);
-      appendClip(f, probe.duration, probe.keyframeTimes, probe.fps);
-    } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : String(e);
-      setLoadError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [appendClip]);
+  const appendFile = useCallback(
+    async (f: File) => {
+      setLoading(true);
+      setLoadError(null);
+      try {
+        const probe = await probeFile(f);
+        appendClip(f, probe.duration, probe.keyframeTimes, probe.fps);
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setLoadError(msg);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [appendClip],
+  );
 
   // Global drag and drop (external files onto the app)
   const handleDrop = useCallback(
@@ -202,7 +231,8 @@ function Editor({
       e.preventDefault();
       setIsDragOver(false);
       // If this is an internal clip drag, ignore at the global level
-      if (e.dataTransfer.types.includes('text/plain') && !e.dataTransfer.types.includes('Files')) return;
+      if (e.dataTransfer.types.includes("text/plain") && !e.dataTransfer.types.includes("Files"))
+        return;
       const f = e.dataTransfer.files[0];
       if (!f) return;
       // If a clip is already loaded, append; otherwise initialise
@@ -212,11 +242,11 @@ function Editor({
         await loadFile(f);
       }
     },
-    [clips.length, loadFile, appendFile]
+    [clips.length, loadFile, appendFile],
   );
 
   const handleDragOver = (e: React.DragEvent) => {
-    if (e.dataTransfer.types.includes('Files')) {
+    if (e.dataTransfer.types.includes("Files")) {
       e.preventDefault();
       setIsDragOver(true);
     }
@@ -227,7 +257,7 @@ function Editor({
   const handleFileInput = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (f) await loadFile(f);
-    e.target.value = '';
+    e.target.value = "";
   };
 
   // Timeline drop zone: accept clips dragged from the media panel
@@ -237,7 +267,7 @@ function Editor({
       e.stopPropagation();
       setIsTimelineDragOver(false);
 
-      const clipId = e.dataTransfer.getData('text/plain');
+      const clipId = e.dataTransfer.getData("text/plain");
       if (clipId) {
         // Internal clip drag from media panel — append to track
         const item = mediaItems.find((it) => it.id === clipId);
@@ -258,7 +288,7 @@ function Editor({
         }
       }
     },
-    [mediaItems, clips.length, loadFile, appendFile]
+    [mediaItems, clips.length, loadFile, appendFile],
   );
 
   const handleTimelineDragOver = (e: React.DragEvent) => {
@@ -301,7 +331,7 @@ function Editor({
       )}
 
       {/* Top navbar */}
-      <header className="flex items-center gap-3 px-4 h-12 bg-card border-b border-border flex-shrink-0">
+      <header className="flex items-center gap-3 px-4 h-12 bg-card border-b border-border shrink-0">
         {/* Back to projects */}
         <Button
           id="btn-back-to-projects"
@@ -322,7 +352,9 @@ function Editor({
             Video<span className="text-primary">Cut</span>
           </span>
           <span className="text-muted-foreground/40 text-sm">/</span>
-          <span className="text-sm text-foreground/70 font-medium truncate max-w-40">{projectName}</span>
+          <span className="text-sm text-foreground/70 font-medium truncate max-w-40">
+            {projectName}
+          </span>
         </div>
 
         <div className="h-4 w-px bg-border" />
@@ -344,7 +376,7 @@ function Editor({
           <>
             <div className="h-4 w-px bg-border" />
             <div className="flex items-center gap-2 text-xs text-muted-foreground min-w-0">
-              <Film className="text-primary size-3 flex-shrink-0" />
+              <Film className="text-primary size-3 shrink-0" />
               <span className="truncate max-w-48 text-foreground/80">{file.name}</span>
               {probeInfo && (
                 <>
@@ -357,9 +389,7 @@ function Editor({
                     {probeInfo.fps.toFixed(0)}fps
                   </span>
                   <span className="text-muted-foreground/30">·</span>
-                  <span className="text-muted-foreground/60">
-                    {formatDuration(duration)}
-                  </span>
+                  <span className="text-muted-foreground/60">{formatDuration(duration)}</span>
                   {probeInfo.keyframeInterval > 2 && (
                     <Badge
                       variant="warning"
@@ -423,13 +453,12 @@ function Editor({
           <div className="flex-1 flex flex-col overflow-hidden">
             {/* Top row: Media panel | Player | Cut list */}
             <div className="flex flex-1 min-h-0 overflow-hidden">
-
               {/* Left sidebar: Media panel (collapsible) */}
               <div
-                className="flex-shrink-0 flex border-r border-border bg-card/50 overflow-hidden transition-[width] duration-200 ease-in-out relative"
-                style={{ width: mediaPanelOpen ? '13rem' : '0px' }}
+                className="shrink-0 flex border-r border-border bg-card/50 overflow-hidden transition-[width] duration-200 ease-in-out relative"
+                style={{ width: mediaPanelOpen ? "13rem" : "0px" }}
               >
-                <div className="w-52 flex-shrink-0 h-full">
+                <div className="w-52 shrink-0 h-full">
                   <MediaPanel
                     items={mediaItems}
                     onAddFiles={addMediaFiles}
@@ -446,30 +475,34 @@ function Editor({
                 <button
                   id="btn-toggle-media-panel"
                   onClick={() => setMediaPanelOpen((v) => !v)}
-                  title={mediaPanelOpen ? 'Collapse media panel' : 'Expand media panel'}
+                  title={mediaPanelOpen ? "Collapse media panel" : "Expand media panel"}
                   className="absolute left-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-4 h-10 rounded-r-md bg-card border border-l-0 border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150 cursor-pointer"
                 >
-                  {mediaPanelOpen
-                    ? <PanelLeftClose className="size-3" />
-                    : <PanelLeftOpen className="size-3" />}
+                  {mediaPanelOpen ? (
+                    <PanelLeftClose className="size-3" />
+                  ) : (
+                    <PanelLeftOpen className="size-3" />
+                  )}
                 </button>
 
                 {/* Right panel toggle */}
                 <button
                   id="btn-toggle-cut-list"
                   onClick={() => setCutListOpen((v) => !v)}
-                  title={cutListOpen ? 'Collapse cut list' : 'Expand cut list'}
+                  title={cutListOpen ? "Collapse cut list" : "Expand cut list"}
                   className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-4 h-10 rounded-l-md bg-card border border-r-0 border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150 cursor-pointer"
                 >
-                  {cutListOpen
-                    ? <PanelRightClose className="size-3" />
-                    : <PanelRightOpen className="size-3" />}
+                  {cutListOpen ? (
+                    <PanelRightClose className="size-3" />
+                  ) : (
+                    <PanelRightOpen className="size-3" />
+                  )}
                 </button>
 
                 {/* Error banner when file fails to load */}
                 {loadError && !file && (
                   <div className="absolute top-3 left-6 right-6 z-10 p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive-foreground text-xs flex items-center gap-2">
-                    <AlertTriangle className="size-3.5 flex-shrink-0" />
+                    <AlertTriangle className="size-3.5 shrink-0" />
                     <span className="font-semibold">Error loading file:</span> {loadError}
                   </div>
                 )}
@@ -479,20 +512,20 @@ function Editor({
 
               {/* Right: Cut list (collapsible) */}
               <div
-                className="flex-shrink-0 flex border-l border-border overflow-hidden transition-[width] duration-200 ease-in-out"
-                style={{ width: cutListOpen ? '16rem' : '0px' }}
+                className="shrink-0 flex border-l border-border overflow-hidden transition-[width] duration-200 ease-in-out"
+                style={{ width: cutListOpen ? "16rem" : "0px" }}
               >
-                <div className="w-64 flex-shrink-0 h-full p-3 pl-0">
+                <div className="w-64 shrink-0 h-full">
                   <CutListPanel player={player} />
                 </div>
               </div>
             </div>
 
             {/* Toolbar above timeline */}
-            <div className="flex items-center gap-1 px-3 h-9 flex-shrink-0 border-t border-border bg-card/60">
+            <div className="flex items-center gap-1 px-3 h-9 shrink-0 border-t border-border bg-card/60">
               <Button
                 id="btn-cut"
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                 onClick={() => cutAtCursor()}
                 disabled={!file}
@@ -504,7 +537,7 @@ function Editor({
 
               <Button
                 id="btn-trim-left"
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                 onClick={() => trimLeft()}
                 disabled={!file}
@@ -516,7 +549,7 @@ function Editor({
 
               <Button
                 id="btn-trim-right"
-                variant="ghost"
+                variant="secondary"
                 size="sm"
                 onClick={() => trimRight()}
                 disabled={!file}
@@ -567,15 +600,18 @@ function Editor({
             {/* Full-width Timeline */}
             <div
               id="timeline-container"
-              className={`h-32 flex-shrink-0 border-t transition-all duration-150 relative ${
+              className={`h-32 shrink-0 border-t transition-all duration-150 relative ${
                 isTimelineDragOver
-                  ? 'border-primary shadow-[0_-2px_12px_0] shadow-primary/20'
-                  : 'border-border'
+                  ? "border-primary shadow-[0_-2px_12px_0] shadow-primary/20"
+                  : "border-border"
               }`}
               onDrop={handleTimelineDrop}
               onDragOver={handleTimelineDragOver}
               onDragLeave={handleTimelineDragLeave}
-              onDragEnd={() => { setDraggingClipId(null); setIsTimelineDragOver(false); }}
+              onDragEnd={() => {
+                setDraggingClipId(null);
+                setIsTimelineDragOver(false);
+              }}
             >
               <Timeline player={player} className="h-full" />
 
@@ -585,7 +621,7 @@ function Editor({
                   <div className="flex items-center gap-2 bg-card/90 border border-primary/40 rounded-lg px-4 py-2 shadow-lg">
                     <Film className="size-4 text-primary" />
                     <span className="text-sm font-semibold text-foreground">
-                      {clips.length === 0 ? 'Drop to load clip' : 'Drop to add clip'}
+                      {clips.length === 0 ? "Drop to load clip" : "Drop to add clip"}
                     </span>
                   </div>
                 </div>

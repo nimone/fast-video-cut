@@ -5,10 +5,12 @@ import { useEffect, useRef, useState, useCallback } from 'react';
 import {
   Scissors, Download, HelpCircle, FolderOpen, RotateCcw, RotateCw,
   Slash, ChevronLeft, ChevronRight, Film, AlertTriangle,
+  PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
 } from 'lucide-react';
 import { Timeline } from './components/timeline/timeline';
 import { PlayerPanel } from './components/editor/player';
 import { CutListPanel } from './components/editor/cut-list-panel';
+import { MediaPanel, useMediaItems } from './components/editor/media-panel';
 import { ExportDialog } from './components/editor/export-dialog';
 import { ShortcutHelp } from './components/info/shortcut-help';
 import { probeFile } from './media/probe';
@@ -33,6 +35,14 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
+  // Track which clip is being dragged from media panel, and whether it's over the timeline
+  const [draggingClipId, setDraggingClipId] = useState<string | null>(null);
+  const [isTimelineDragOver, setIsTimelineDragOver] = useState(false);
+  // Collapsible panels
+  const [mediaPanelOpen, setMediaPanelOpen] = useState(true);
+  const [cutListOpen, setCutListOpen] = useState(true);
+
+  const { items: mediaItems, addFiles: addMediaFiles, removeItem: removeMediaItem } = useMediaItems();
   const [probeInfo, setProbeInfo] = useState<{
     fps: number;
     width: number;
@@ -127,11 +137,13 @@ export default function App() {
     }
   }, [initFile]);
 
-  // Drag and drop
+  // Global drag and drop (external files onto the app)
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragOver(false);
+      // If this is an internal clip drag, ignore at the global level
+      if (e.dataTransfer.types.includes('text/plain') && !e.dataTransfer.types.includes('Files')) return;
       const f = e.dataTransfer.files[0];
       if (f) await loadFile(f);
     },
@@ -139,8 +151,10 @@ export default function App() {
   );
 
   const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragOver(true);
+    if (e.dataTransfer.types.includes('Files')) {
+      e.preventDefault();
+      setIsDragOver(true);
+    }
   };
 
   const handleDragLeave = () => setIsDragOver(false);
@@ -149,6 +163,41 @@ export default function App() {
     const f = e.target.files?.[0];
     if (f) await loadFile(f);
     e.target.value = '';
+  };
+
+  // Timeline drop zone: accept clips dragged from the media panel
+  const handleTimelineDrop = useCallback(
+    async (e: React.DragEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      setIsTimelineDragOver(false);
+
+      const clipId = e.dataTransfer.getData('text/plain');
+      if (clipId) {
+        // Internal clip drag from media panel
+        const item = mediaItems.find((it) => it.id === clipId);
+        if (item) {
+          setDraggingClipId(null);
+          await loadFile(item.file);
+        }
+      } else if (e.dataTransfer.files.length > 0) {
+        // External file dropped directly on timeline
+        await loadFile(e.dataTransfer.files[0]);
+      }
+    },
+    [mediaItems, loadFile]
+  );
+
+  const handleTimelineDragOver = (e: React.DragEvent) => {
+    // Accept both internal clips and external files
+    e.preventDefault();
+    e.stopPropagation();
+    setIsTimelineDragOver(true);
+  };
+
+  const handleTimelineDragLeave = (e: React.DragEvent) => {
+    e.stopPropagation();
+    setIsTimelineDragOver(false);
   };
 
   return (
@@ -411,26 +460,91 @@ export default function App() {
             </div>
           </div>
         ) : (
-          // Editor layout
-          <div className="flex-1 flex overflow-hidden">
-            {/* Left: Player */}
-            <div className="flex-1 min-w-0 flex flex-col p-3 gap-3">
-              <div className="flex-1 min-h-0">
+          // Editor layout — column: top row (panels) + full-width timeline at bottom
+          <div className="flex-1 flex flex-col overflow-hidden">
+            {/* Top row: Media panel | Player | Cut list */}
+            <div className="flex flex-1 min-h-0 overflow-hidden">
+
+              {/* Left sidebar: Media panel (collapsible) */}
+              <div
+                className="flex-shrink-0 flex border-r border-border bg-card/50 overflow-hidden transition-[width] duration-200 ease-in-out relative"
+                style={{ width: mediaPanelOpen ? '13rem' : '0px' }}
+              >
+                <div className="w-52 flex-shrink-0 h-full">
+                  <MediaPanel
+                    items={mediaItems}
+                    onAddFiles={addMediaFiles}
+                    onRemoveItem={removeMediaItem}
+                    onDragStart={setDraggingClipId}
+                    activeItemId={draggingClipId}
+                  />
+                </div>
+              </div>
+
+              {/* Center: Player (with panel toggle buttons) */}
+              <div className="flex-1 min-w-0 p-3 relative">
+                {/* Left panel toggle */}
+                <button
+                  id="btn-toggle-media-panel"
+                  onClick={() => setMediaPanelOpen((v) => !v)}
+                  title={mediaPanelOpen ? 'Collapse media panel' : 'Expand media panel'}
+                  className="absolute left-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-4 h-10 rounded-r-md bg-card border border-l-0 border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150 cursor-pointer"
+                >
+                  {mediaPanelOpen
+                    ? <PanelLeftClose className="size-3" />
+                    : <PanelLeftOpen className="size-3" />}
+                </button>
+
+                {/* Right panel toggle */}
+                <button
+                  id="btn-toggle-cut-list"
+                  onClick={() => setCutListOpen((v) => !v)}
+                  title={cutListOpen ? 'Collapse cut list' : 'Expand cut list'}
+                  className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-4 h-10 rounded-l-md bg-card border border-r-0 border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150 cursor-pointer"
+                >
+                  {cutListOpen
+                    ? <PanelRightClose className="size-3" />
+                    : <PanelRightOpen className="size-3" />}
+                </button>
+
                 <PlayerPanel player={player} />
               </div>
 
-              {/* Timeline */}
+              {/* Right: Cut list (collapsible) */}
               <div
-                id="timeline-container"
-                className="h-32 rounded-xl overflow-hidden border border-border"
+                className="flex-shrink-0 flex border-l border-border overflow-hidden transition-[width] duration-200 ease-in-out"
+                style={{ width: cutListOpen ? '16rem' : '0px' }}
               >
-                <Timeline player={player} className="h-full" />
+                <div className="w-64 flex-shrink-0 h-full p-3 pl-0">
+                  <CutListPanel player={player} />
+                </div>
               </div>
             </div>
 
-            {/* Right: Cut list */}
-            <div className="w-64 flex-shrink-0 p-3 pl-0">
-              <CutListPanel player={player} />
+            {/* Full-width Timeline */}
+            <div
+              id="timeline-container"
+              className={`h-32 flex-shrink-0 border-t transition-all duration-150 relative ${
+                isTimelineDragOver
+                  ? 'border-primary shadow-[0_-2px_12px_0] shadow-primary/20'
+                  : 'border-border'
+              }`}
+              onDrop={handleTimelineDrop}
+              onDragOver={handleTimelineDragOver}
+              onDragLeave={handleTimelineDragLeave}
+              onDragEnd={() => { setDraggingClipId(null); setIsTimelineDragOver(false); }}
+            >
+              <Timeline player={player} className="h-full" />
+
+              {/* Drop overlay */}
+              {isTimelineDragOver && (
+                <div className="absolute inset-0 bg-primary/10 backdrop-blur-[1px] flex items-center justify-center pointer-events-none z-10">
+                  <div className="flex items-center gap-2 bg-card/90 border border-primary/40 rounded-lg px-4 py-2 shadow-lg">
+                    <Film className="size-4 text-primary" />
+                    <span className="text-sm font-semibold text-foreground">Drop to load clip</span>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

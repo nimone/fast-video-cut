@@ -192,28 +192,22 @@ export function Timeline({ player, className = '' }: TimelineProps) {
       onHover: (vt, isDragging) => {
         setHoverTime(vt);
         if (vt !== null) {
-          // Find which clip this global VT falls in
+          // Find whichever clip the cursor is over (active OR inactive)
           const clip = clipInfos.find((c) => vt >= c.vtStart && vt <= c.vtEnd);
-          if (clip && clip.id === activeClipId) {
-            // Map to source-time and sync to store so cut/trim can use it
+          if (clip) {
             const localVT = vt - clip.vtStart;
             const st = vtToSt(localVT, clip.segments);
-            setStoreHoverTime(st);
-          } else {
-            // Hovering over a different clip — clear store hover
-            setStoreHoverTime(null);
-          }
-          if (player && !isDragging) {
-            const clip2 = clipInfos.find((c) => vt >= c.vtStart && vt <= c.vtEnd);
-            if (clip2) {
-              const localVT = vt - clip2.vtStart;
-              const st = vtToSt(localVT, clip2.segments);
+            // Always report hover source-time + which clip — store uses this for cut/trim
+            setStoreHoverTime(st, clip.id);
+            if (player && !isDragging) {
               void player.showHoverPreview(st);
             }
+          } else {
+            setStoreHoverTime(null, null);
           }
         } else {
           // Mouse left the timeline
-          setStoreHoverTime(null);
+          setStoreHoverTime(null, null);
           if (player) void player.clearHoverPreview();
         }
       },

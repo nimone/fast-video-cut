@@ -48,6 +48,8 @@ interface EditStoreState {
   // Player state (shared)
   currentTime: number;
   hoverTime: number | null;
+  /** Which clip the cursor is currently hovering over (may differ from activeClipId) */
+  hoverClipId: string | null;
 
   // Selected range on timeline (for delete)
   selectionStart: number | null;
@@ -62,7 +64,7 @@ interface EditStoreState {
   removeClip: (id: string) => void;
 
   setCurrentTime: (time: number) => void;
-  setHoverTime: (time: number | null) => void;
+  setHoverTime: (time: number | null, clipId?: string | null) => void;
   setSelection: (start: number | null, end: number | null) => void;
   setSelectedSegmentIndex: (idx: number | null) => void;
 
@@ -140,6 +142,7 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
   historyIndex: -1,
   currentTime: 0,
   hoverTime: null,
+  hoverClipId: null,
   selectionStart: null,
   selectionEnd: null,
 
@@ -166,6 +169,7 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       selectedSegmentIndex: null,
       currentTime: 0,
       hoverTime: null,
+      hoverClipId: null,
       selectionStart: null,
       selectionEnd: null,
     });
@@ -194,6 +198,7 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       selectedSegmentIndex: null,
       currentTime: 0,
       hoverTime: null,
+      hoverClipId: null,
       selectionStart: null,
       selectionEnd: null,
     });
@@ -210,6 +215,7 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       selectedSegmentIndex: null,
       currentTime: 0,
       hoverTime: null,
+      hoverClipId: null,
     });
   },
 
@@ -249,8 +255,8 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
     set({ currentTime: time });
   },
 
-  setHoverTime(time) {
-    set({ hoverTime: time });
+  setHoverTime(time, clipId) {
+    set({ hoverTime: time, hoverClipId: clipId ?? null });
   },
 
   setSelection(start, end) {
@@ -262,14 +268,23 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
   },
 
   cutAtCursor(time) {
-    const { currentTime, hoverTime, segments, keyframeTimes, history, historyIndex, clips, activeClipId } = get();
+    const { hoverTime, hoverClipId, activeClipId, clips, currentTime, segments, keyframeTimes, history, historyIndex } = get();
+    // Resolve target clip — use hovered clip if different, otherwise active clip
+    const targetId = (hoverClipId && hoverClipId !== activeClipId) ? hoverClipId : activeClipId;
+    const targetClip = clips.find((c) => c.id === targetId);
+    if (!targetClip) return;
+    const isActive = targetId === activeClipId;
+    const workSegs = isActive ? segments : targetClip.segments;
+    const workKf   = isActive ? keyframeTimes : targetClip.keyframeTimes;
+    const workHist = isActive ? history : targetClip.history;
+    const workHistIdx = isActive ? historyIndex : targetClip.historyIndex;
+
     const targetTime = typeof time === 'number' ? time : (hoverTime ?? currentTime);
-    const snapTime = snapStart(targetTime, keyframeTimes);
+    const snapTime = snapStart(targetTime, workKf);
 
     const newSegments: Segment[] = [];
     let didCut = false;
-
-    for (const seg of segments) {
+    for (const seg of workSegs) {
       if (!didCut && snapTime > seg.start && snapTime < seg.end) {
         newSegments.push({ start: seg.start, end: snapTime });
         newSegments.push({ start: snapTime, end: seg.end });
@@ -278,88 +293,97 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
         newSegments.push({ ...seg });
       }
     }
-
     if (!didCut) return;
 
-    const h = pushHistory(history, historyIndex, newSegments);
-    // Sync active clip in clips array
-    const updatedClips = activeClipId
-      ? updateClips(clips, activeClipId, {
-          ...clips.find((c) => c.id === activeClipId)!,
-          segments: newSegments,
-          history: h.history,
-          historyIndex: h.historyIndex,
-        })
-      : clips;
-    set({ segments: newSegments, clips: updatedClips, ...h });
+    const h = pushHistory(workHist, workHistIdx, newSegments);
+    const updatedClips = updateClips(clips, targetId!, {
+      ...targetClip,
+      segments: newSegments,
+      history: h.history,
+      historyIndex: h.historyIndex,
+    });
+    // Only update derived active-clip mirrors if we edited the active clip
+    if (isActive) {
+      set({ segments: newSegments, clips: updatedClips, ...h });
+    } else {
+      set({ clips: updatedClips });
+    }
   },
 
   trimLeft(time) {
-    const { currentTime, hoverTime, segments, keyframeTimes, history, historyIndex, clips, activeClipId } = get();
-    const targetTime = typeof time === 'number' ? time : (hoverTime ?? currentTime);
-    const snapTime = snapStart(targetTime, keyframeTimes);
+    const { hoverTime, hoverClipId, activeClipId, clips, currentTime, segments, keyframeTimes, history, historyIndex } = get();
+    const targetId = (hoverClipId && hoverClipId !== activeClipId) ? hoverClipId : activeClipId;
+    const targetClip = clips.find((c) => c.id === targetId);
+    if (!targetClip) return;
+    const isActive = targetId === activeClipId;
+    const workSegs = isActive ? segments : targetClip.segments;
+    const workKf   = isActive ? keyframeTimes : targetClip.keyframeTimes;
+    const workHist = isActive ? history : targetClip.history;
+    const workHistIdx = isActive ? historyIndex : targetClip.historyIndex;
 
-    const containingSegIdx = segments.findIndex(
+    const targetTime = typeof time === 'number' ? time : (hoverTime ?? currentTime);
+    const snapTime = snapStart(targetTime, workKf);
+
+    const containingSegIdx = workSegs.findIndex(
       (seg) => snapTime >= seg.start && snapTime <= seg.end
     );
-
     if (containingSegIdx === -1) return;
 
-    const newSegments = segments
-      .map((seg, idx) => {
-        if (idx === containingSegIdx) {
-          return { start: snapTime, end: seg.end };
-        }
-        return { ...seg };
-      })
+    const newSegments = workSegs
+      .map((seg, idx) => idx === containingSegIdx ? { start: snapTime, end: seg.end } : { ...seg })
       .filter((seg) => seg.start < seg.end);
-
     if (newSegments.length === 0) return;
 
-    const h = pushHistory(history, historyIndex, newSegments);
-    const updatedClips = activeClipId
-      ? updateClips(clips, activeClipId, {
-          ...clips.find((c) => c.id === activeClipId)!,
-          segments: newSegments,
-          history: h.history,
-          historyIndex: h.historyIndex,
-        })
-      : clips;
-    set({ segments: newSegments, clips: updatedClips, ...h });
+    const h = pushHistory(workHist, workHistIdx, newSegments);
+    const updatedClips = updateClips(clips, targetId!, {
+      ...targetClip,
+      segments: newSegments,
+      history: h.history,
+      historyIndex: h.historyIndex,
+    });
+    if (isActive) {
+      set({ segments: newSegments, clips: updatedClips, ...h });
+    } else {
+      set({ clips: updatedClips });
+    }
   },
 
   trimRight(time) {
-    const { currentTime, hoverTime, segments, keyframeTimes, history, historyIndex, clips, activeClipId } = get();
-    const targetTime = typeof time === 'number' ? time : (hoverTime ?? currentTime);
-    const snapTime = snapStart(targetTime, keyframeTimes);
+    const { hoverTime, hoverClipId, activeClipId, clips, currentTime, segments, keyframeTimes, history, historyIndex } = get();
+    const targetId = (hoverClipId && hoverClipId !== activeClipId) ? hoverClipId : activeClipId;
+    const targetClip = clips.find((c) => c.id === targetId);
+    if (!targetClip) return;
+    const isActive = targetId === activeClipId;
+    const workSegs = isActive ? segments : targetClip.segments;
+    const workKf   = isActive ? keyframeTimes : targetClip.keyframeTimes;
+    const workHist = isActive ? history : targetClip.history;
+    const workHistIdx = isActive ? historyIndex : targetClip.historyIndex;
 
-    const containingSegIdx = segments.findIndex(
+    const targetTime = typeof time === 'number' ? time : (hoverTime ?? currentTime);
+    const snapTime = snapStart(targetTime, workKf);
+
+    const containingSegIdx = workSegs.findIndex(
       (seg) => snapTime >= seg.start && snapTime <= seg.end
     );
-
     if (containingSegIdx === -1) return;
 
-    const newSegments = segments
-      .map((seg, idx) => {
-        if (idx === containingSegIdx) {
-          return { start: seg.start, end: snapTime };
-        }
-        return { ...seg };
-      })
+    const newSegments = workSegs
+      .map((seg, idx) => idx === containingSegIdx ? { start: seg.start, end: snapTime } : { ...seg })
       .filter((seg) => seg.start < seg.end);
-
     if (newSegments.length === 0) return;
 
-    const h = pushHistory(history, historyIndex, newSegments);
-    const updatedClips = activeClipId
-      ? updateClips(clips, activeClipId, {
-          ...clips.find((c) => c.id === activeClipId)!,
-          segments: newSegments,
-          history: h.history,
-          historyIndex: h.historyIndex,
-        })
-      : clips;
-    set({ segments: newSegments, clips: updatedClips, ...h });
+    const h = pushHistory(workHist, workHistIdx, newSegments);
+    const updatedClips = updateClips(clips, targetId!, {
+      ...targetClip,
+      segments: newSegments,
+      history: h.history,
+      historyIndex: h.historyIndex,
+    });
+    if (isActive) {
+      set({ segments: newSegments, clips: updatedClips, ...h });
+    } else {
+      set({ clips: updatedClips });
+    }
   },
 
   deleteSelection() {

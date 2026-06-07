@@ -6,6 +6,7 @@ import {
   Scissors, Download, HelpCircle, FolderOpen, RotateCcw, RotateCw,
   Slash, ChevronLeft, ChevronRight, Film, AlertTriangle,
   PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen,
+  ArrowLeft,
 } from 'lucide-react';
 import { Timeline } from './components/timeline/timeline';
 import { PlayerPanel } from './components/editor/player';
@@ -13,10 +14,13 @@ import { CutListPanel } from './components/editor/cut-list-panel';
 import { MediaPanel, useMediaItems } from './components/editor/media-panel';
 import { ExportDialog } from './components/editor/export-dialog';
 import { ShortcutHelp } from './components/info/shortcut-help';
+import { ProjectsHome } from './components/home/projects-home';
 import { probeFile } from './media/probe';
 import { Player } from './media/player';
 import { useEditStore } from './store/edit-store';
 import { useKeymapStore } from './store/keymap-store';
+import { useProjectStore } from './store/project-store';
+import type { ProjectStore } from './store/project-store';
 import { registerKeymap } from './keymap/keys';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -29,6 +33,28 @@ function formatDuration(s: number): string {
 }
 
 export default function App() {
+  const { activeProjectId, closeProject, saveProjectState, activeProject } = useProjectStore();
+  const currentProject = activeProject();
+
+  // Show the home screen when no project is active
+  if (!activeProjectId) {
+    return <ProjectsHome />;
+  }
+
+  return <Editor projectId={activeProjectId} projectName={currentProject?.name ?? ''} onClose={closeProject} saveProjectState={saveProjectState} />;
+}
+
+function Editor({
+  projectId,
+  projectName,
+  onClose,
+  saveProjectState,
+}: {
+  projectId: string;
+  projectName: string;
+  onClose: () => void;
+  saveProjectState: ProjectStore['saveProjectState'];
+}) {
   const [player, setPlayer] = useState<Player | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [cheatsheetOpen, setCheatsheetOpen] = useState(false);
@@ -59,6 +85,8 @@ export default function App() {
     file,
     duration,
     segments,
+    keyframeTimes,
+    fps,
     canUndo,
     canRedo,
     undo,
@@ -70,6 +98,20 @@ export default function App() {
     selectionStart,
     initFile,
   } = useEditStore();
+
+  // Auto-save edit state to project store whenever segments/duration change
+  useEffect(() => {
+    if (!projectId || !duration) return;
+    saveProjectState(projectId, {
+      segments,
+      duration,
+      keyframeTimes,
+      fps,
+      segmentCount: segments.length,
+      mediaFileNames: file ? [file.name] : [],
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments, duration]);
 
   // Register keyboard shortcuts
   useEffect(() => {
@@ -229,12 +271,27 @@ export default function App() {
 
       {/* Top navbar */}
       <header className="flex items-center gap-3 px-4 h-12 bg-card border-b border-border flex-shrink-0">
-        {/* Logo */}
-        <div className="flex items-center gap-2 mr-3">
+        {/* Back to projects */}
+        <Button
+          id="btn-back-to-projects"
+          variant="ghost"
+          size="icon-sm"
+          onClick={onClose}
+          title="Back to projects"
+        >
+          <ArrowLeft />
+        </Button>
+
+        <div className="h-4 w-px bg-border" />
+
+        {/* Logo + project name */}
+        <div className="flex items-center gap-2 mr-1">
           <Scissors className="text-primary size-4.5" />
           <span className="font-semibold text-sm tracking-tight text-foreground">
             Video<span className="text-primary">Cut</span>
           </span>
+          <span className="text-muted-foreground/40 text-sm">/</span>
+          <span className="text-sm text-foreground/70 font-medium truncate max-w-40">{projectName}</span>
         </div>
 
         <div className="h-4 w-px bg-border" />

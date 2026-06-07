@@ -1,41 +1,56 @@
 // src/components/timeline/timeline-draw.ts
-// Pure canvas rendering: segments, keyframe ticks, playhead, cursor.
-// Called in a rAF loop. Dirty-region updates handled by caller.
+// Pure canvas rendering: multi-clip blocks, segments, keyframe ticks, playhead, cursor.
+// Called in a rAF loop.
+
+export interface ClipInfo {
+  id: string;
+  /** Global VT start of this clip */
+  vtStart: number;
+  /** Global VT end of this clip  */
+  vtEnd: number;
+  color: string;
+  label: string;             // filename without extension
+  segments: Array<{ start: number; end: number }>;
+  keyframeTimes: number[];
+  isActive: boolean;
+}
 
 export interface TimelineDrawOptions {
   canvas: HTMLCanvasElement;
+  /** TOTAL virtual duration across all clips */
   duration: number;
+  /** Per-clip info for rendering */
+  clips: ClipInfo[];
+  /** Active clip's segments (legacy compat – used for selection coords) */
   segments: Array<{ start: number; end: number }>;
+  /** Active clip's keyframes */
   keyframeTimes: number[];
+  /** Global VT of playhead */
   currentTime: number;
   hoverTime: number | null;
   selectionStart: number | null;
   selectionEnd: number | null;
   selectedSegmentIndex: number | null;
-  /** Visible time window */
   viewStart: number;
   viewEnd: number;
+  activeClipId: string | null;
 }
 
-const COLORS = {
-  bg: '#121212', // Neutral dark gray canvas background
-  track: '#262626', // Lighter neutral gray track background
-  segment: '#5b4fff',
-  segmentHover: '#7c6fff',
-  segmentBorder: '#8b7fff',
-  keyframe: 'rgba(255, 255, 255, 0.25)',
-  keyframeMajor: '#5a9cc5',
+const BASE_COLORS = {
+  bg: '#121212',
+  track: '#1e1e1e',
+  keyframe: 'rgba(255, 255, 255, 0.22)',
   playhead: '#ff4c8b',
-  hoverLine: 'rgba(255, 255, 255, 0.35)',
-  selection: 'rgba(91, 79, 255, 0.25)',
+  hoverLine: 'rgba(255, 255, 255, 0.32)',
+  selection: 'rgba(91, 79, 255, 0.22)',
   selectionBorder: '#5b4fff',
-  gapDark: '#1c1c1c',
   timeLabel: 'rgba(255,255,255,0.5)',
   timeLabelMajor: 'rgba(255,255,255,0.85)',
   segmentLabel: 'rgba(255,255,255,0.7)',
+  clipDivider: 'rgba(255,255,255,0.18)',
 };
 
-const TIMELINE_HEIGHT_FRAC = 0.35; // Sleeker, less track height
+const TIMELINE_HEIGHT_FRAC = 0.35;
 const TICK_AREA_HEIGHT = 22; // px for time ruler
 
 function timeToX(
@@ -78,7 +93,6 @@ export function vtToSt(vt: number, segments: Segment[]): number {
 export function stToVt(st: number, segments: Segment[]): number {
   if (segments.length === 0) return 0;
 
-  // 1. Check if st is inside any segment
   let accum = 0;
   for (const seg of segments) {
     if (st >= seg.start && st <= seg.end) {
@@ -87,7 +101,7 @@ export function stToVt(st: number, segments: Segment[]): number {
     accum += seg.end - seg.start;
   }
 
-  // 2. If st is in a gap, find the next chronological segment (closest seg.start > st)
+  // If st is in a gap, find next chronological segment
   let nextSegIdx = -1;
   let minStartAfterSt = Infinity;
   for (let i = 0; i < segments.length; i++) {
@@ -99,7 +113,6 @@ export function stToVt(st: number, segments: Segment[]): number {
   }
 
   if (nextSegIdx !== -1) {
-    // Sum the durations of all segments before nextSegIdx in the timeline array
     let vtAccum = 0;
     for (let i = 0; i < nextSegIdx; i++) {
       vtAccum += segments[i].end - segments[i].start;
@@ -107,7 +120,6 @@ export function stToVt(st: number, segments: Segment[]): number {
     return vtAccum;
   }
 
-  // 3. Otherwise, map to the very end of all segments
   let totalDur = 0;
   for (const seg of segments) {
     totalDur += seg.end - seg.start;
@@ -115,11 +127,36 @@ export function stToVt(st: number, segments: Segment[]): number {
   return totalDur;
 }
 
+// ── hex color helpers ──────────────────────────────────────────────────────
+
+function hexToRgb(hex: string): [number, number, number] {
+  const r = parseInt(hex.slice(1, 3), 16);
+  const g = parseInt(hex.slice(3, 5), 16);
+  const b = parseInt(hex.slice(5, 7), 16);
+  return [r, g, b];
+}
+
+function lighten(hex: string, amount: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgb(${Math.min(255, r + amount)},${Math.min(255, g + amount)},${Math.min(255, b + amount)})`;
+}
+
+function darken(hex: string, amount: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgb(${Math.max(0, r - amount)},${Math.max(0, g - amount)},${Math.max(0, b - amount)})`;
+}
+
+function withAlpha(hex: string, alpha: number): string {
+  const [r, g, b] = hexToRgb(hex);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+// ── Main draw ──────────────────────────────────────────────────────────────
+
 export function drawTimeline(opts: TimelineDrawOptions): void {
   const {
     canvas,
-    segments,
-    keyframeTimes,
+    clips,
     currentTime,
     hoverTime,
     selectionStart,
@@ -127,6 +164,7 @@ export function drawTimeline(opts: TimelineDrawOptions): void {
     selectedSegmentIndex,
     viewStart,
     viewEnd,
+    activeClipId,
   } = opts;
 
   const ctx = canvas.getContext('2d');
@@ -137,128 +175,81 @@ export function drawTimeline(opts: TimelineDrawOptions): void {
   const dpr = window.devicePixelRatio || 1;
 
   // Background
-  ctx.fillStyle = COLORS.bg;
+  ctx.fillStyle = BASE_COLORS.bg;
   ctx.fillRect(0, 0, W, H);
 
-  const gapH = 4 * dpr; // Gap space between ruler and track
+  const gapH = 4 * dpr;
   const trackTop = TICK_AREA_HEIGHT * dpr;
   const actualTrackTop = trackTop + gapH;
   const trackH = (H - actualTrackTop) * TIMELINE_HEIGHT_FRAC;
   const trackBottom = actualTrackTop + trackH;
 
-  // Time ruler background (distinct dark neutral gray)
+  // Time ruler background
   ctx.fillStyle = '#1a1a1a';
   ctx.fillRect(0, 0, W, trackTop);
 
-  // Draw time ruler ticks
   drawRuler(ctx, W, trackTop, viewStart, viewEnd, dpr);
 
   // Track background
-  ctx.fillStyle = COLORS.track;
+  ctx.fillStyle = BASE_COLORS.track;
   ctx.fillRect(0, actualTrackTop, W, trackH);
 
-  // Selection region
+  // ── Selection region (global VT coords) ───────────────────────────────
   if (selectionStart !== null && selectionEnd !== null) {
     const sx = timeToX(Math.min(selectionStart, selectionEnd), viewStart, viewEnd, W);
     const ex = timeToX(Math.max(selectionStart, selectionEnd), viewStart, viewEnd, W);
-    ctx.fillStyle = COLORS.selection;
+    ctx.fillStyle = BASE_COLORS.selection;
     ctx.fillRect(sx, actualTrackTop, ex - sx, trackH);
-    ctx.strokeStyle = COLORS.selectionBorder;
+    ctx.strokeStyle = BASE_COLORS.selectionBorder;
     ctx.lineWidth = 1 * dpr;
     ctx.strokeRect(sx, actualTrackTop, ex - sx, trackH);
   }
 
-  // Draw kept segments contiguously
-  let accum = 0;
-  for (let i = 0; i < segments.length; i++) {
-    const seg = segments[i];
-    const dur = seg.end - seg.start;
-    const x1 = Math.max(0, timeToX(accum, viewStart, viewEnd, W));
-    const x2 = Math.min(W, timeToX(accum + dur, viewStart, viewEnd, W));
-    if (x2 <= x1) {
-      accum += dur;
-      continue;
-    }
-
-    const isSelected = selectedSegmentIndex === i;
-    const r = Math.min(6 * dpr, (x2 - x1) / 2);
-
-    // Segment background gradient
-    const grad = ctx.createLinearGradient(x1, actualTrackTop, x1, trackBottom);
-    if (isSelected) {
-      grad.addColorStop(0, '#8b5cf6'); // Violet-500
-      grad.addColorStop(0.6, '#6d28d9'); // Violet-700
-      grad.addColorStop(1, '#4c1d95'); // Violet-900
-    } else {
-      grad.addColorStop(0, '#7065ff');
-      grad.addColorStop(0.6, '#5b4fff');
-      grad.addColorStop(1, '#4a3fd0');
-    }
-
-    if (isSelected) {
-      ctx.shadowColor = 'rgba(255, 215, 0, 0.6)';
-      ctx.shadowBlur = 12 * dpr;
-    }
-
-    ctx.beginPath();
-    ctx.roundRect(x1, actualTrackTop, x2 - x1, trackH, r);
-    ctx.fillStyle = grad;
-    ctx.fill();
-
-    // Reset shadow
-    ctx.shadowBlur = 0;
-
-    // Segment border glow
-    ctx.strokeStyle = isSelected ? '#ffd700' : COLORS.segmentBorder;
-    ctx.lineWidth = isSelected ? 2.5 * dpr : 1.5 * dpr;
-    ctx.beginPath();
-    ctx.roundRect(x1, actualTrackTop, x2 - x1, trackH, r);
-    ctx.stroke();
-
-    // Segment label
-    const segW = x2 - x1;
-    if (segW > 40 * dpr) {
-      ctx.font = `${10 * dpr}px ui-monospace, monospace`;
-      ctx.fillStyle = COLORS.segmentLabel;
-      ctx.textAlign = 'center';
-      ctx.fillText(
-        formatTime(seg.end - seg.start),
-        x1 + segW / 2,
-        actualTrackTop + trackH / 2 + 4 * dpr
-      );
-    }
-    accum += dur;
+  // ── Render each clip block ─────────────────────────────────────────────
+  for (const clip of clips) {
+    drawClipBlock(
+      ctx, clip, W, actualTrackTop, trackH, trackBottom,
+      viewStart, viewEnd, dpr, selectedSegmentIndex, activeClipId
+    );
   }
 
-  // Keyframe ticks mapped to virtual time
-  drawKeyframeTicks(ctx, keyframeTimes, segments, viewStart, viewEnd, W, actualTrackTop, trackH, dpr);
+  // ── Clip boundary dividers (vertical lines between clips) ─────────────
+  for (let i = 1; i < clips.length; i++) {
+    const divX = timeToX(clips[i].vtStart, viewStart, viewEnd, W);
+    if (divX < 0 || divX > W) continue;
+    ctx.strokeStyle = BASE_COLORS.clipDivider;
+    ctx.lineWidth = 2 * dpr;
+    ctx.setLineDash([4 * dpr, 3 * dpr]);
+    ctx.beginPath();
+    ctx.moveTo(divX, actualTrackTop);
+    ctx.lineTo(divX, trackBottom);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
 
-  // Hover line & label
+  // ── Hover time indicator ───────────────────────────────────────────────
   if (hoverTime !== null) {
     const hx = timeToX(hoverTime, viewStart, viewEnd, W);
-    
-    // Label
+
     const label = formatTime(hoverTime);
     ctx.font = `${9 * dpr}px ui-monospace, monospace`;
     const tw = ctx.measureText(label).width;
-    
+
     const paddingX = 6 * dpr;
     const paddingY = 2 * dpr;
     const rectW = tw + paddingX * 2;
     const rectH = 11 * dpr + paddingY * 2;
-    
-    const lx = Math.min(W - rectW - 4 * dpr, Math.max(4 * dpr, hx - rectW / 2));
-    const ly = trackTop - rectH - 2 * dpr; // Positioned neatly in the ruler area
 
-    // Hover line (drawn starting from the bottom of the label container)
-    ctx.strokeStyle = COLORS.hoverLine;
+    const lx = Math.min(W - rectW - 4 * dpr, Math.max(4 * dpr, hx - rectW / 2));
+    const ly = trackTop - rectH - 2 * dpr;
+
+    ctx.strokeStyle = BASE_COLORS.hoverLine;
     ctx.lineWidth = 1 * dpr;
     ctx.beginPath();
     ctx.moveTo(hx, ly + rectH);
     ctx.lineTo(hx, H);
     ctx.stroke();
 
-    // Capsule background for label
     ctx.fillStyle = 'rgba(20, 20, 30, 0.95)';
     ctx.beginPath();
     ctx.roundRect(lx, ly, rectW, rectH, 3 * dpr);
@@ -267,24 +258,22 @@ export function drawTimeline(opts: TimelineDrawOptions): void {
     ctx.lineWidth = 1 * dpr;
     ctx.stroke();
 
-    // Text
     ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(label, lx + rectW / 2, ly + rectH / 2 + 0.5 * dpr);
-    ctx.textBaseline = 'alphabetic'; // reset
+    ctx.textBaseline = 'alphabetic';
   }
 
-  // Playhead
+  // ── Playhead ───────────────────────────────────────────────────────────
   const px = timeToX(currentTime, viewStart, viewEnd, W);
   if (px >= 0 && px <= W) {
     const handleW = 10 * dpr;
     const handleH = 14 * dpr;
 
-    // Playhead line
-    ctx.strokeStyle = COLORS.playhead;
+    ctx.strokeStyle = BASE_COLORS.playhead;
     ctx.lineWidth = 2 * dpr;
-    ctx.shadowColor = COLORS.playhead;
+    ctx.shadowColor = BASE_COLORS.playhead;
     ctx.shadowBlur = 6 * dpr;
     ctx.beginPath();
     ctx.moveTo(px, handleH);
@@ -292,39 +281,201 @@ export function drawTimeline(opts: TimelineDrawOptions): void {
     ctx.stroke();
     ctx.shadowBlur = 0;
 
-    // Playhead handle: rounded pill shape starting at y = 0
-    ctx.fillStyle = COLORS.playhead;
+    ctx.fillStyle = BASE_COLORS.playhead;
     ctx.beginPath();
     ctx.roundRect(px - handleW / 2, 0, handleW, handleH, 3 * dpr);
     ctx.fill();
 
-    // Time under playhead (solid pill-shaped container at the bottom)
     const plabel = formatTime(currentTime);
     ctx.font = `bold ${9 * dpr}px ui-monospace, monospace`;
     const ptw = ctx.measureText(plabel).width;
-    
+
     const pxPaddingX = 6 * dpr;
     const pxPaddingY = 3 * dpr;
     const pxRectW = ptw + pxPaddingX * 2;
     const pxRectH = 12 * dpr + pxPaddingY * 2;
-    
+
     const plx = Math.min(W - pxRectW - 4 * dpr, Math.max(4 * dpr, px - pxRectW / 2));
     const ply = H - pxRectH - 2 * dpr;
 
-    // Capsule background
-    ctx.fillStyle = COLORS.playhead;
+    ctx.fillStyle = BASE_COLORS.playhead;
     ctx.beginPath();
     ctx.roundRect(plx, ply, pxRectW, pxRectH, 4 * dpr);
     ctx.fill();
 
-    // Bold white text inside capsule
     ctx.fillStyle = '#ffffff';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(plabel, plx + pxRectW / 2, ply + pxRectH / 2 + 0.5 * dpr);
-    ctx.textBaseline = 'alphabetic'; // reset
+    ctx.textBaseline = 'alphabetic';
   }
 }
+
+// ── Per-clip block renderer ────────────────────────────────────────────────
+
+function drawClipBlock(
+  ctx: CanvasRenderingContext2D,
+  clip: ClipInfo,
+  W: number,
+  actualTrackTop: number,
+  trackH: number,
+  trackBottom: number,
+  viewStart: number,
+  viewEnd: number,
+  dpr: number,
+  selectedSegmentIndex: number | null,
+  activeClipId: string | null,
+): void {
+  const { vtStart, vtEnd, color, label, segments, keyframeTimes, isActive, id } = clip;
+
+  // Clip block bounds in pixel space
+  const clipX1 = Math.max(0, timeToX(vtStart, viewStart, viewEnd, W));
+  const clipX2 = Math.min(W, timeToX(vtEnd, viewStart, viewEnd, W));
+  if (clipX2 <= clipX1) return;
+
+  const clipW = clipX2 - clipX1;
+  const r = Math.min(5 * dpr, clipW / 2);
+
+  // ── Clip background (dark base) ───────────────────────────────────────
+  const bgGrad = ctx.createLinearGradient(clipX1, actualTrackTop, clipX1, trackBottom);
+  if (isActive) {
+    bgGrad.addColorStop(0, darken(color, 30));
+    bgGrad.addColorStop(1, darken(color, 60));
+  } else {
+    bgGrad.addColorStop(0, darken(color, 55));
+    bgGrad.addColorStop(1, darken(color, 80));
+  }
+  ctx.fillStyle = bgGrad;
+  ctx.beginPath();
+  ctx.roundRect(clipX1, actualTrackTop, clipW, trackH, r);
+  ctx.fill();
+
+  // ── Kept segments within the clip ─────────────────────────────────────
+  // Segments are in source-time; we need to map them to VT within the clip,
+  // then to global VT by adding vtStart.
+  let localAccum = 0;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const dur = seg.end - seg.start;
+    const segGlobalStart = vtStart + localAccum;
+    const segGlobalEnd = vtStart + localAccum + dur;
+
+    const sx = Math.max(clipX1, timeToX(segGlobalStart, viewStart, viewEnd, W));
+    const ex = Math.min(clipX2, timeToX(segGlobalEnd, viewStart, viewEnd, W));
+    if (ex <= sx) {
+      localAccum += dur;
+      continue;
+    }
+
+    const isSelected = isActive && id === activeClipId && selectedSegmentIndex === i;
+    const segW = ex - sx;
+    const segR = Math.min(4 * dpr, segW / 2);
+
+    // Segment fill gradient
+    const segGrad = ctx.createLinearGradient(sx, actualTrackTop, sx, trackBottom);
+    if (isSelected) {
+      segGrad.addColorStop(0, '#c4b5fd'); // violet-300
+      segGrad.addColorStop(0.5, '#8b5cf6'); // violet-500
+      segGrad.addColorStop(1, '#6d28d9'); // violet-700
+    } else if (isActive) {
+      segGrad.addColorStop(0, lighten(color, 30));
+      segGrad.addColorStop(0.55, color);
+      segGrad.addColorStop(1, darken(color, 20));
+    } else {
+      // Inactive clip: desaturate / dim
+      segGrad.addColorStop(0, lighten(color, 5));
+      segGrad.addColorStop(1, darken(color, 10));
+    }
+
+    if (isSelected) {
+      ctx.shadowColor = 'rgba(255, 215, 0, 0.6)';
+      ctx.shadowBlur = 12 * dpr;
+    }
+
+    ctx.beginPath();
+    ctx.roundRect(sx, actualTrackTop, segW, trackH, segR);
+    ctx.fillStyle = segGrad;
+    ctx.fill();
+
+    ctx.shadowBlur = 0;
+
+    // Segment border
+    ctx.strokeStyle = isSelected
+      ? '#ffd700'
+      : isActive
+        ? lighten(color, 50)
+        : withAlpha(lighten(color, 30), 0.5);
+    ctx.lineWidth = isSelected ? 2.5 * dpr : 1.2 * dpr;
+    ctx.beginPath();
+    ctx.roundRect(sx, actualTrackTop, segW, trackH, segR);
+    ctx.stroke();
+
+    // Segment duration label
+    if (segW > 40 * dpr) {
+      ctx.font = `${10 * dpr}px ui-monospace, monospace`;
+      ctx.fillStyle = isActive ? BASE_COLORS.segmentLabel : 'rgba(255,255,255,0.4)';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(
+        formatTime(dur),
+        sx + segW / 2,
+        actualTrackTop + trackH / 2
+      );
+      ctx.textBaseline = 'alphabetic';
+    }
+
+    localAccum += dur;
+  }
+
+  // ── Active clip: golden glow border ───────────────────────────────────
+  if (isActive) {
+    ctx.strokeStyle = withAlpha(lighten(color, 80), 0.9);
+    ctx.lineWidth = 2 * dpr;
+    ctx.shadowColor = withAlpha(color, 0.6);
+    ctx.shadowBlur = 8 * dpr;
+    ctx.beginPath();
+    ctx.roundRect(clipX1, actualTrackTop, clipW, trackH, r);
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+  } else {
+    // Inactive clip: subtle border
+    ctx.strokeStyle = withAlpha(color, 0.25);
+    ctx.lineWidth = 1 * dpr;
+    ctx.beginPath();
+    ctx.roundRect(clipX1, actualTrackTop, clipW, trackH, r);
+    ctx.stroke();
+  }
+
+  // ── Keyframe ticks (for active clip only, or all clips if >1 segment visible) ──
+  if (isActive) {
+    drawKeyframeTicksForClip(
+      ctx, keyframeTimes, segments, vtStart,
+      viewStart, viewEnd, W, actualTrackTop, trackH, dpr
+    );
+  }
+
+  // ── Clip label (filename, centered) ───────────────────────────────────
+  const minWidthForLabel = 50 * dpr;
+  if (clipW > minWidthForLabel) {
+    const labelText = label.length > 24 ? label.slice(0, 22) + '…' : label;
+    ctx.font = `bold ${9 * dpr}px ui-sans-serif, system-ui, sans-serif`;
+    const tw = ctx.measureText(labelText).width;
+
+    // Only draw if it fits reasonably
+    if (tw < clipW - 12 * dpr) {
+      const labelY = actualTrackTop + trackH + 10 * dpr;
+      ctx.fillStyle = isActive
+        ? withAlpha(lighten(color, 40), 0.9)
+        : withAlpha(lighten(color, 10), 0.5);
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(labelText, clipX1 + clipW / 2, labelY);
+      ctx.textBaseline = 'alphabetic';
+    }
+  }
+}
+
+// ── Time ruler ────────────────────────────────────────────────────────────
 
 function drawRuler(
   ctx: CanvasRenderingContext2D,
@@ -335,7 +486,6 @@ function drawRuler(
   dpr: number
 ): void {
   const viewDuration = viewEnd - viewStart;
-  // Choose tick interval based on view duration
   const INTERVALS = [0.01, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600];
   const targetTicks = W / (60 * dpr);
   let interval = INTERVALS[0];
@@ -351,29 +501,29 @@ function drawRuler(
     const x = ((t - viewStart) / viewDuration) * W;
     const isMajor = Math.abs(t % majorInterval) < interval * 0.01;
 
-    ctx.strokeStyle = isMajor ? COLORS.timeLabelMajor : COLORS.timeLabel;
+    ctx.strokeStyle = isMajor ? BASE_COLORS.timeLabelMajor : BASE_COLORS.timeLabel;
     ctx.lineWidth = isMajor ? 1.2 * dpr : 0.8 * dpr;
     ctx.beginPath();
-    // Ticks point downwards from the very top of the canvas
     ctx.moveTo(x, 0);
     ctx.lineTo(x, isMajor ? 6 * dpr : 3 * dpr);
     ctx.stroke();
 
     if (isMajor) {
-      // Bold, clean monospace font for timing numbers
       ctx.font = `bold ${9 * dpr}px ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace`;
-      ctx.fillStyle = COLORS.timeLabelMajor;
+      ctx.fillStyle = BASE_COLORS.timeLabelMajor;
       ctx.textAlign = 'center';
-      // Time labels sit at the bottom of the time ruler, below the ticks
       ctx.fillText(formatTime(t), x, trackTop - 2 * dpr);
     }
   }
 }
 
-function drawKeyframeTicks(
+// ── Keyframe ticks for one clip ────────────────────────────────────────────
+
+function drawKeyframeTicksForClip(
   ctx: CanvasRenderingContext2D,
   keyframeTimes: number[],
   segments: Array<{ start: number; end: number }>,
+  clipVTStart: number,
   viewStart: number,
   viewEnd: number,
   W: number,
@@ -382,23 +532,24 @@ function drawKeyframeTicks(
   dpr: number
 ): void {
   const minPixelsPerTick = 3 * dpr;
-  ctx.strokeStyle = COLORS.keyframe;
+  ctx.strokeStyle = BASE_COLORS.keyframe;
   ctx.lineWidth = 1 * dpr;
   ctx.setLineDash([2 * dpr, 2 * dpr]);
 
   let lastX = -999;
   for (const t of keyframeTimes) {
+    // Check if inside any segment
     let isInSegment = false;
     for (const seg of segments) {
-      if (t >= seg.start && t <= seg.end) {
-        isInSegment = true;
-        break;
-      }
+      if (t >= seg.start && t <= seg.end) { isInSegment = true; break; }
     }
     if (!isInSegment) continue;
 
-    const vt = stToVt(t, segments);
-    const x = ((vt - viewStart) / (viewEnd - viewStart)) * W;
+    // Map source-time keyframe → local VT → global VT
+    const localVT = stToVt(t, segments);
+    const globalVT = clipVTStart + localVT;
+
+    const x = ((globalVT - viewStart) / (viewEnd - viewStart)) * W;
     if (x < 0 || x > W) continue;
     if (x - lastX < minPixelsPerTick) continue;
     lastX = x;

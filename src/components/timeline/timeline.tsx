@@ -1,8 +1,9 @@
 // src/components/timeline/timeline.tsx
 // React wrapper for the canvas timeline.
 
-import { useRef, useEffect, useCallback, useState } from 'react';
-import { drawTimeline, stToVt, vtToSt } from './timeline-draw';
+import { useRef, useEffect, useCallback, useState, useMemo } from 'react';
+import { drawTimeline, vtToSt } from './timeline-draw';
+import type { ClipInfo } from './timeline-draw';
 import { attachTimelineInput } from './timeline-input';
 import { useEditStore } from '../../store/edit-store';
 import type { Player } from '../../media/player';
@@ -24,19 +25,88 @@ export function Timeline({ player, className = '' }: TimelineProps) {
   const pendingSeekRef = useRef<number | null>(null);
 
   const {
-    segments,
-    keyframeTimes,
+    clips: storeClips,
+    activeClipId,
+    segments,         // active clip's segments (for seek mapping)
     currentTime,
     duration,
     selectionStart,
     selectionEnd,
     selectedSegmentIndex,
     setCurrentTime,
+    setHoverTime: setStoreHoverTime,
     setSelection,
     setSelectedSegmentIndex,
+    setActiveClipId,
   } = useEditStore();
 
-  const totalDuration = segments.reduce((acc, s) => acc + (s.end - s.start), 0) || duration;
+  // ── Build ClipInfo[] with sequential virtual-time offsets ───────────────
+  const clipInfos = useMemo<ClipInfo[]>(() => {
+    let vtOffset = 0;
+    return storeClips.map((c) => {
+      const totalSegDur = c.segments.reduce((s, seg) => s + (seg.end - seg.start), 0);
+      const vtStart = vtOffset;
+      const vtEnd = vtOffset + totalSegDur;
+      vtOffset = vtEnd;
+
+      const label = c.file.name.replace(/\.[^.]+$/, '');
+
+      return {
+        id: c.id,
+        vtStart,
+        vtEnd,
+        color: c.color,
+        label,
+        segments: c.segments,
+        keyframeTimes: c.keyframeTimes,
+        isActive: c.id === activeClipId,
+      };
+    });
+  }, [storeClips, activeClipId]);
+
+  // Total virtual duration = sum of all clip kept-segment durations
+  const totalDuration = useMemo(
+    () => clipInfos.reduce((acc, c) => acc + (c.vtEnd - c.vtStart), 0) || duration,
+    [clipInfos, duration]
+  );
+
+  // ── Map source-time currentTime → global virtual time ──────────────────
+  // The active clip's currentTime is in source-time; we need to find which
+  // clip is active, map st→localVT, then add that clip's vtStart.
+  const virtualCurrentTime = useMemo(() => {
+    const activeInfo = clipInfos.find((c) => c.id === activeClipId);
+    if (!activeInfo || segments.length === 0) return 0;
+
+    // Map source-time → local VT within the active clip
+    let localVT = 0;
+    let accum = 0;
+    for (const seg of segments) {
+      if (currentTime >= seg.start && currentTime <= seg.end) {
+        localVT = accum + (currentTime - seg.start);
+        break;
+      }
+      accum += seg.end - seg.start;
+      localVT = accum; // fallback: end of clip
+    }
+    return activeInfo.vtStart + localVT;
+  }, [currentTime, segments, clipInfos, activeClipId]);
+
+  // Selection in global VT (simple: use active clip's vtStart + localVT)
+  const mapStToGlobalVT = useCallback((st: number) => {
+    const activeInfo = clipInfos.find((c) => c.id === activeClipId);
+    if (!activeInfo || segments.length === 0) return st;
+    let accum = 0;
+    for (const seg of segments) {
+      if (st >= seg.start && st <= seg.end) {
+        return activeInfo.vtStart + accum + (st - seg.start);
+      }
+      accum += seg.end - seg.start;
+    }
+    return activeInfo.vtStart + accum;
+  }, [clipInfos, activeClipId, segments]);
+
+  const virtualSelectionStart = selectionStart !== null ? mapStToGlobalVT(selectionStart) : null;
+  const virtualSelectionEnd = selectionEnd !== null ? mapStToGlobalVT(selectionEnd) : null;
 
   // Initialize view to full virtual duration when totalDuration changes
   useEffect(() => {
@@ -46,7 +116,7 @@ export function Timeline({ player, className = '' }: TimelineProps) {
     }
   }, [totalDuration]);
 
-  // Draw loop for the timeline canvas (non-preview)
+  // Draw loop for the timeline canvas
   const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas || totalDuration === 0) return;
@@ -58,15 +128,12 @@ export function Timeline({ player, className = '' }: TimelineProps) {
       canvas.height = rect.height * dpr;
     }
 
-    const virtualCurrentTime = stToVt(currentTime, segments);
-    const virtualSelectionStart = selectionStart !== null ? stToVt(selectionStart, segments) : null;
-    const virtualSelectionEnd = selectionEnd !== null ? stToVt(selectionEnd, segments) : null;
-
     drawTimeline({
       canvas,
       duration: totalDuration,
+      clips: clipInfos,
       segments,
-      keyframeTimes,
+      keyframeTimes: storeClips.find((c) => c.id === activeClipId)?.keyframeTimes ?? [],
       currentTime: virtualCurrentTime,
       hoverTime,
       selectionStart: virtualSelectionStart,
@@ -74,10 +141,16 @@ export function Timeline({ player, className = '' }: TimelineProps) {
       selectedSegmentIndex,
       viewStart: viewStart || 0,
       viewEnd: viewEnd || totalDuration,
+      activeClipId,
     });
-  }, [segments, keyframeTimes, currentTime, hoverTime, selectionStart, selectionEnd, selectedSegmentIndex, viewStart, viewEnd, totalDuration]);
+  }, [
+    clipInfos, segments, storeClips, activeClipId,
+    virtualCurrentTime, hoverTime,
+    virtualSelectionStart, virtualSelectionEnd,
+    selectedSegmentIndex, viewStart, viewEnd, totalDuration,
+  ]);
 
-  // rAF render loop — canvas only, no media decoding here
+  // rAF render loop
   useEffect(() => {
     const loop = () => {
       draw();
@@ -89,10 +162,10 @@ export function Timeline({ player, className = '' }: TimelineProps) {
     };
   }, [draw]);
 
-  // Throttled seek — coalesces rapid calls into one per rAF tick
+  // Throttled seek
   const throttledSeek = useCallback((time: number) => {
     pendingSeekRef.current = time;
-    if (seekRafRef.current !== null) return; // already scheduled
+    if (seekRafRef.current !== null) return;
     seekRafRef.current = requestAnimationFrame(() => {
       seekRafRef.current = null;
       const t = pendingSeekRef.current;
@@ -117,29 +190,55 @@ export function Timeline({ player, className = '' }: TimelineProps) {
       },
       getDuration: () => totalDuration,
       onHover: (vt, isDragging) => {
-        // Update the visual indicator and trigger hover preview on main player
         setHoverTime(vt);
-        if (player) {
-          if (vt !== null && !isDragging) {
-            const st = vtToSt(vt, segments);
-            void player.showHoverPreview(st);
+        if (vt !== null) {
+          // Find which clip this global VT falls in
+          const clip = clipInfos.find((c) => vt >= c.vtStart && vt <= c.vtEnd);
+          if (clip && clip.id === activeClipId) {
+            // Map to source-time and sync to store so cut/trim can use it
+            const localVT = vt - clip.vtStart;
+            const st = vtToSt(localVT, clip.segments);
+            setStoreHoverTime(st);
           } else {
-            void player.clearHoverPreview();
+            // Hovering over a different clip — clear store hover
+            setStoreHoverTime(null);
           }
+          if (player && !isDragging) {
+            const clip2 = clipInfos.find((c) => vt >= c.vtStart && vt <= c.vtEnd);
+            if (clip2) {
+              const localVT = vt - clip2.vtStart;
+              const st = vtToSt(localVT, clip2.segments);
+              void player.showHoverPreview(st);
+            }
+          }
+        } else {
+          // Mouse left the timeline
+          setStoreHoverTime(null);
+          if (player) void player.clearHoverPreview();
         }
       },
       onSeek: (vt) => {
-        // Called on mousedown and drag — throttle to one decode per rAF
-        const st = vtToSt(vt, segments);
+        // Find which clip this VT falls in
+        const clip = clipInfos.find((c) => vt >= c.vtStart && vt <= c.vtEnd);
+        if (!clip) return;
+
+        const localVT = vt - clip.vtStart;
+        const st = vtToSt(localVT, clip.segments);
+
+        // Switch active clip if needed
+        if (clip.id !== activeClipId) {
+          setActiveClipId(clip.id);
+        }
+
         setCurrentTime(st);
         throttledSeek(st);
 
-        // Find which segment index contains vt
+        // Find segment index within that clip
         let accum = 0;
         let clickedIdx = -1;
-        for (let i = 0; i < segments.length; i++) {
-          const dur = segments[i].end - segments[i].start;
-          if (vt >= accum && vt <= accum + dur) {
+        for (let i = 0; i < clip.segments.length; i++) {
+          const dur = clip.segments[i].end - clip.segments[i].start;
+          if (localVT >= accum && localVT <= accum + dur) {
             clickedIdx = i;
             break;
           }
@@ -150,22 +249,30 @@ export function Timeline({ player, className = '' }: TimelineProps) {
         }
       },
       onSelectionChange: (vStart, vEnd) => {
-        const sStart = vStart !== null ? vtToSt(vStart, segments) : null;
-        const sEnd = vEnd !== null ? vtToSt(vEnd, segments) : null;
-        setSelection(sStart, sEnd);
+        // Map global VT back to source-time on the active clip
+        const activeInfo = clipInfos.find((c) => c.id === activeClipId);
+        if (!activeInfo) {
+          setSelection(null, null);
+          return;
+        }
+        const toSt = (vt: number | null) => {
+          if (vt === null) return null;
+          const localVT = vt - activeInfo.vtStart;
+          return vtToSt(localVT, activeInfo.segments);
+        };
+        setSelection(toSt(vStart), toSt(vEnd));
       },
     });
 
     return () => {
       cleanup();
-      // Cancel any pending throttled seek
       if (seekRafRef.current !== null) {
         cancelAnimationFrame(seekRafRef.current);
         seekRafRef.current = null;
       }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [player, duration, totalDuration, segments, viewStart, viewEnd, throttledSeek]);
+  }, [player, duration, totalDuration, clipInfos, activeClipId, viewStart, viewEnd, throttledSeek]);
 
   return (
     <div className={`relative w-full ${className}`} style={{ cursor: 'crosshair' }}>

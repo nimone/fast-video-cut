@@ -1,5 +1,5 @@
 // src/store/edit-store.ts
-// zustand store: kept segment list + cut/trim/delete ops + undo/redo history
+// zustand store: multi-clip track + cut/trim/delete ops + per-clip undo/redo history
 
 import { create } from 'zustand';
 import { snapToNearestKeyframeBefore } from '../media/keyframes';
@@ -9,20 +9,39 @@ export interface Segment {
   end: number;
 }
 
+// Clip colors — cycled through as clips are added
+const CLIP_COLORS = [
+  '#5b4fff', '#0ea5e9', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899',
+];
+
+export interface TrackClip {
+  id: string;
+  file: File;
+  duration: number;
+  keyframeTimes: number[];
+  fps: number;
+  segments: Segment[];
+  history: Segment[][];
+  historyIndex: number;
+  color: string;
+}
+
 interface EditStoreState {
-  // File info
+  // ── Multi-clip track ──────────────────────────────────────────────
+  clips: TrackClip[];
+  activeClipId: string | null;
+
+  // ── Derived / active-clip mirrors (kept for backward compat) ──────
   file: File | null;
   duration: number;
   keyframeTimes: number[];
   fps: number;
-
-  // Segments (kept regions)
   segments: Segment[];
 
-  // Selected segment index (for reordering, deletion, visual highlight)
+  // Selected segment index (within the active clip)
   selectedSegmentIndex: number | null;
 
-  // Undo/redo history — each entry is a snapshot of segments
+  // Undo/redo history — mirrors active clip's history
   history: Segment[][];
   historyIndex: number;
 
@@ -34,8 +53,14 @@ interface EditStoreState {
   selectionStart: number | null;
   selectionEnd: number | null;
 
-  // Actions
+  // ── Actions ───────────────────────────────────────────────────────
+  /** RESET — clears all clips, creates exactly one clip */
   initFile: (file: File, duration: number, keyframeTimes: number[], fps: number) => void;
+  /** ADD — appends a new clip, returns its id */
+  appendClip: (file: File, duration: number, keyframeTimes: number[], fps: number) => string;
+  setActiveClipId: (id: string) => void;
+  removeClip: (id: string) => void;
+
   setCurrentTime: (time: number) => void;
   setHoverTime: (time: number | null) => void;
   setSelection: (start: number | null, end: number | null) => void;
@@ -76,7 +101,35 @@ function snapStart(time: number, keyframeTimes: number[]): number {
   return snapToNearestKeyframeBefore(time, keyframeTimes);
 }
 
+/** Build the top-level derived fields from a clip */
+function derivedFromClip(clip: TrackClip) {
+  return {
+    file: clip.file,
+    duration: clip.duration,
+    keyframeTimes: clip.keyframeTimes,
+    fps: clip.fps,
+    segments: clip.segments,
+    history: clip.history,
+    historyIndex: clip.historyIndex,
+  };
+}
+
+/** Update clips array: replace the clip matching `id` with `updatedClip` */
+function updateClips(clips: TrackClip[], id: string, updatedClip: TrackClip): TrackClip[] {
+  return clips.map((c) => (c.id === id ? updatedClip : c));
+}
+
+let colorIndex = 0;
+function nextColor(): string {
+  const color = CLIP_COLORS[colorIndex % CLIP_COLORS.length];
+  colorIndex++;
+  return color;
+}
+
 export const useEditStore = create<EditStoreState>((set, get) => ({
+  clips: [],
+  activeClipId: null,
+
   file: null,
   duration: 0,
   keyframeTimes: [],
@@ -91,21 +144,104 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
   selectionEnd: null,
 
   initFile(file, duration, keyframeTimes, fps) {
+    colorIndex = 0; // reset color cycling
     const initialSegments: Segment[] = [{ start: 0, end: duration }];
     const initialHistory = [initialSegments.map((s) => ({ ...s }))];
-    set({
+    const id = crypto.randomUUID();
+    const clip: TrackClip = {
+      id,
       file,
       duration,
       keyframeTimes,
       fps,
       segments: initialSegments,
-      selectedSegmentIndex: null,
       history: initialHistory,
       historyIndex: 0,
+      color: nextColor(),
+    };
+    set({
+      clips: [clip],
+      activeClipId: id,
+      ...derivedFromClip(clip),
+      selectedSegmentIndex: null,
       currentTime: 0,
       hoverTime: null,
       selectionStart: null,
       selectionEnd: null,
+    });
+  },
+
+  appendClip(file, duration, keyframeTimes, fps) {
+    const initialSegments: Segment[] = [{ start: 0, end: duration }];
+    const initialHistory = [initialSegments.map((s) => ({ ...s }))];
+    const id = crypto.randomUUID();
+    const clip: TrackClip = {
+      id,
+      file,
+      duration,
+      keyframeTimes,
+      fps,
+      segments: initialSegments,
+      history: initialHistory,
+      historyIndex: 0,
+      color: nextColor(),
+    };
+    const newClips = [...get().clips, clip];
+    set({
+      clips: newClips,
+      activeClipId: id,
+      ...derivedFromClip(clip),
+      selectedSegmentIndex: null,
+      currentTime: 0,
+      hoverTime: null,
+      selectionStart: null,
+      selectionEnd: null,
+    });
+    return id;
+  },
+
+  setActiveClipId(id) {
+    const { clips } = get();
+    const clip = clips.find((c) => c.id === id);
+    if (!clip) return;
+    set({
+      activeClipId: id,
+      ...derivedFromClip(clip),
+      selectedSegmentIndex: null,
+      currentTime: 0,
+      hoverTime: null,
+    });
+  },
+
+  removeClip(id) {
+    const { clips, activeClipId } = get();
+    const newClips = clips.filter((c) => c.id !== id);
+    if (newClips.length === 0) {
+      set({
+        clips: [],
+        activeClipId: null,
+        file: null,
+        duration: 0,
+        keyframeTimes: [],
+        fps: 30,
+        segments: [],
+        history: [],
+        historyIndex: -1,
+        selectedSegmentIndex: null,
+        currentTime: 0,
+      });
+      return;
+    }
+    let newActiveId = activeClipId;
+    if (activeClipId === id) {
+      newActiveId = newClips[0].id;
+    }
+    const activeClip = newClips.find((c) => c.id === newActiveId) ?? newClips[0];
+    set({
+      clips: newClips,
+      activeClipId: activeClip.id,
+      ...derivedFromClip(activeClip),
+      selectedSegmentIndex: null,
     });
   },
 
@@ -126,8 +262,8 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
   },
 
   cutAtCursor(time) {
-    const { currentTime, segments, keyframeTimes, history, historyIndex } = get();
-    const targetTime = typeof time === 'number' ? time : currentTime;
+    const { currentTime, hoverTime, segments, keyframeTimes, history, historyIndex, clips, activeClipId } = get();
+    const targetTime = typeof time === 'number' ? time : (hoverTime ?? currentTime);
     const snapTime = snapStart(targetTime, keyframeTimes);
 
     const newSegments: Segment[] = [];
@@ -135,7 +271,6 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
 
     for (const seg of segments) {
       if (!didCut && snapTime > seg.start && snapTime < seg.end) {
-        // Split this segment
         newSegments.push({ start: seg.start, end: snapTime });
         newSegments.push({ start: snapTime, end: seg.end });
         didCut = true;
@@ -144,23 +279,31 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       }
     }
 
-    if (!didCut) return; // Cursor not in any segment
+    if (!didCut) return;
 
     const h = pushHistory(history, historyIndex, newSegments);
-    set({ segments: newSegments, ...h });
+    // Sync active clip in clips array
+    const updatedClips = activeClipId
+      ? updateClips(clips, activeClipId, {
+          ...clips.find((c) => c.id === activeClipId)!,
+          segments: newSegments,
+          history: h.history,
+          historyIndex: h.historyIndex,
+        })
+      : clips;
+    set({ segments: newSegments, clips: updatedClips, ...h });
   },
 
   trimLeft(time) {
-    const { currentTime, segments, keyframeTimes, history, historyIndex } = get();
-    const targetTime = typeof time === 'number' ? time : currentTime;
+    const { currentTime, hoverTime, segments, keyframeTimes, history, historyIndex, clips, activeClipId } = get();
+    const targetTime = typeof time === 'number' ? time : (hoverTime ?? currentTime);
     const snapTime = snapStart(targetTime, keyframeTimes);
 
-    // Find the segment containing the cursor
     const containingSegIdx = segments.findIndex(
       (seg) => snapTime >= seg.start && snapTime <= seg.end
     );
 
-    if (containingSegIdx === -1) return; // Cursor is not in any segment
+    if (containingSegIdx === -1) return;
 
     const newSegments = segments
       .map((seg, idx) => {
@@ -171,23 +314,30 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       })
       .filter((seg) => seg.start < seg.end);
 
-    if (newSegments.length === 0) return; // Keep at least one segment
+    if (newSegments.length === 0) return;
 
     const h = pushHistory(history, historyIndex, newSegments);
-    set({ segments: newSegments, ...h });
+    const updatedClips = activeClipId
+      ? updateClips(clips, activeClipId, {
+          ...clips.find((c) => c.id === activeClipId)!,
+          segments: newSegments,
+          history: h.history,
+          historyIndex: h.historyIndex,
+        })
+      : clips;
+    set({ segments: newSegments, clips: updatedClips, ...h });
   },
 
   trimRight(time) {
-    const { currentTime, segments, keyframeTimes, history, historyIndex } = get();
-    const targetTime = typeof time === 'number' ? time : currentTime;
+    const { currentTime, hoverTime, segments, keyframeTimes, history, historyIndex, clips, activeClipId } = get();
+    const targetTime = typeof time === 'number' ? time : (hoverTime ?? currentTime);
     const snapTime = snapStart(targetTime, keyframeTimes);
 
-    // Find the segment containing the cursor
     const containingSegIdx = segments.findIndex(
       (seg) => snapTime >= seg.start && snapTime <= seg.end
     );
 
-    if (containingSegIdx === -1) return; // Cursor is not in any segment
+    if (containingSegIdx === -1) return;
 
     const newSegments = segments
       .map((seg, idx) => {
@@ -198,14 +348,22 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       })
       .filter((seg) => seg.start < seg.end);
 
-    if (newSegments.length === 0) return; // Keep at least one segment
+    if (newSegments.length === 0) return;
 
     const h = pushHistory(history, historyIndex, newSegments);
-    set({ segments: newSegments, ...h });
+    const updatedClips = activeClipId
+      ? updateClips(clips, activeClipId, {
+          ...clips.find((c) => c.id === activeClipId)!,
+          segments: newSegments,
+          history: h.history,
+          historyIndex: h.historyIndex,
+        })
+      : clips;
+    set({ segments: newSegments, clips: updatedClips, ...h });
   },
 
   deleteSelection() {
-    const { selectionStart, selectionEnd, segments, keyframeTimes, history, historyIndex } = get();
+    const { selectionStart, selectionEnd, segments, keyframeTimes, history, historyIndex, clips, activeClipId } = get();
     if (selectionStart === null || selectionEnd === null) return;
     const start = Math.min(selectionStart, selectionEnd);
     const end = Math.max(selectionStart, selectionEnd);
@@ -215,19 +373,15 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
     const newSegments: Segment[] = [];
     for (const seg of segments) {
       if (snapE <= seg.start || snapS >= seg.end) {
-        // No overlap
         newSegments.push({ ...seg });
       } else if (snapS <= seg.start && snapE >= seg.end) {
-        // Selection covers entire segment — remove
+        // covered entirely — drop
       } else if (snapS > seg.start && snapE < seg.end) {
-        // Selection cuts through middle
         newSegments.push({ start: seg.start, end: snapS });
         newSegments.push({ start: snapE, end: seg.end });
       } else if (snapS <= seg.start) {
-        // Selection covers start
         newSegments.push({ start: snapE, end: seg.end });
       } else {
-        // Selection covers end
         newSegments.push({ start: seg.start, end: snapS });
       }
     }
@@ -235,12 +389,20 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
     if (newSegments.length === 0) return;
 
     const h = pushHistory(history, historyIndex, newSegments);
-    set({ segments: newSegments, selectionStart: null, selectionEnd: null, ...h });
+    const updatedClips = activeClipId
+      ? updateClips(clips, activeClipId, {
+          ...clips.find((c) => c.id === activeClipId)!,
+          segments: newSegments,
+          history: h.history,
+          historyIndex: h.historyIndex,
+        })
+      : clips;
+    set({ segments: newSegments, selectionStart: null, selectionEnd: null, clips: updatedClips, ...h });
   },
 
   deleteSegmentByIndex(idx) {
-    const { segments, history, historyIndex, selectedSegmentIndex } = get();
-    if (segments.length <= 1) return; // Can't remove last segment
+    const { segments, history, historyIndex, selectedSegmentIndex, clips, activeClipId } = get();
+    if (segments.length <= 1) return;
     const newSegments = segments.filter((_, i) => i !== idx);
     const h = pushHistory(history, historyIndex, newSegments);
 
@@ -251,10 +413,19 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       newSelectedIdx = selectedSegmentIndex - 1;
     }
 
+    const updatedClips = activeClipId
+      ? updateClips(clips, activeClipId, {
+          ...clips.find((c) => c.id === activeClipId)!,
+          segments: newSegments,
+          history: h.history,
+          historyIndex: h.historyIndex,
+        })
+      : clips;
     set({
       segments: newSegments,
       selectedSegmentIndex: newSelectedIdx,
-      ...h
+      clips: updatedClips,
+      ...h,
     });
   },
 
@@ -266,7 +437,7 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
   },
 
   moveSegment(idx, direction) {
-    const { segments, history, historyIndex, selectedSegmentIndex } = get();
+    const { segments, history, historyIndex, selectedSegmentIndex, clips, activeClipId } = get();
     if (idx < 0 || idx >= segments.length) return;
     const targetIdx = direction === 'left' ? idx - 1 : idx + 1;
     if (targetIdx < 0 || targetIdx >= segments.length) return;
@@ -285,30 +456,57 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       newSelectedIdx = idx;
     }
 
+    const updatedClips = activeClipId
+      ? updateClips(clips, activeClipId, {
+          ...clips.find((c) => c.id === activeClipId)!,
+          segments: newSegments,
+          history: h.history,
+          historyIndex: h.historyIndex,
+        })
+      : clips;
     set({
       segments: newSegments,
       selectedSegmentIndex: newSelectedIdx,
-      ...h
+      clips: updatedClips,
+      ...h,
     });
   },
 
   undo() {
-    const { history, historyIndex } = get();
+    const { history, historyIndex, clips, activeClipId } = get();
     if (historyIndex <= 0) return;
     const newIndex = historyIndex - 1;
+    const newSegments = history[newIndex].map((s) => ({ ...s }));
+    const updatedClips = activeClipId
+      ? updateClips(clips, activeClipId, {
+          ...clips.find((c) => c.id === activeClipId)!,
+          segments: newSegments,
+          historyIndex: newIndex,
+        })
+      : clips;
     set({
-      segments: history[newIndex].map((s) => ({ ...s })),
+      segments: newSegments,
       historyIndex: newIndex,
+      clips: updatedClips,
     });
   },
 
   redo() {
-    const { history, historyIndex } = get();
+    const { history, historyIndex, clips, activeClipId } = get();
     if (historyIndex >= history.length - 1) return;
     const newIndex = historyIndex + 1;
+    const newSegments = history[newIndex].map((s) => ({ ...s }));
+    const updatedClips = activeClipId
+      ? updateClips(clips, activeClipId, {
+          ...clips.find((c) => c.id === activeClipId)!,
+          segments: newSegments,
+          historyIndex: newIndex,
+        })
+      : clips;
     set({
-      segments: history[newIndex].map((s) => ({ ...s })),
+      segments: newSegments,
       historyIndex: newIndex,
+      clips: updatedClips,
     });
   },
 

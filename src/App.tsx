@@ -87,6 +87,7 @@ function Editor({
     segments,
     keyframeTimes,
     fps,
+    clips,
     canUndo,
     canRedo,
     undo,
@@ -97,6 +98,7 @@ function Editor({
     deleteSelection,
     selectionStart,
     initFile,
+    appendClip,
   } = useEditStore();
 
   // Auto-save edit state to project store whenever segments/duration change
@@ -179,6 +181,21 @@ function Editor({
     }
   }, [initFile]);
 
+  /** Append a clip to the track (does NOT reset existing clips) */
+  const appendFile = useCallback(async (f: File) => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      const probe = await probeFile(f);
+      appendClip(f, probe.duration, probe.keyframeTimes, probe.fps);
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      setLoadError(msg);
+    } finally {
+      setLoading(false);
+    }
+  }, [appendClip]);
+
   // Global drag and drop (external files onto the app)
   const handleDrop = useCallback(
     async (e: React.DragEvent) => {
@@ -187,9 +204,15 @@ function Editor({
       // If this is an internal clip drag, ignore at the global level
       if (e.dataTransfer.types.includes('text/plain') && !e.dataTransfer.types.includes('Files')) return;
       const f = e.dataTransfer.files[0];
-      if (f) await loadFile(f);
+      if (!f) return;
+      // If a clip is already loaded, append; otherwise initialise
+      if (clips.length > 0) {
+        await appendFile(f);
+      } else {
+        await loadFile(f);
+      }
     },
-    [loadFile]
+    [clips.length, loadFile, appendFile]
   );
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -216,18 +239,26 @@ function Editor({
 
       const clipId = e.dataTransfer.getData('text/plain');
       if (clipId) {
-        // Internal clip drag from media panel
+        // Internal clip drag from media panel — append to track
         const item = mediaItems.find((it) => it.id === clipId);
         if (item) {
           setDraggingClipId(null);
-          await loadFile(item.file);
+          if (clips.length === 0) {
+            await loadFile(item.file);
+          } else {
+            await appendFile(item.file);
+          }
         }
       } else if (e.dataTransfer.files.length > 0) {
-        // External file dropped directly on timeline
-        await loadFile(e.dataTransfer.files[0]);
+        // External file dropped directly on timeline — append to track
+        if (clips.length === 0) {
+          await loadFile(e.dataTransfer.files[0]);
+        } else {
+          await appendFile(e.dataTransfer.files[0]);
+        }
       }
     },
-    [mediaItems, loadFile]
+    [mediaItems, clips.length, loadFile, appendFile]
   );
 
   const handleTimelineDragOver = (e: React.DragEvent) => {
@@ -553,7 +584,9 @@ function Editor({
                 <div className="absolute inset-0 bg-primary/10 backdrop-blur-[1px] flex items-center justify-center pointer-events-none z-10">
                   <div className="flex items-center gap-2 bg-card/90 border border-primary/40 rounded-lg px-4 py-2 shadow-lg">
                     <Film className="size-4 text-primary" />
-                    <span className="text-sm font-semibold text-foreground">Drop to load clip</span>
+                    <span className="text-sm font-semibold text-foreground">
+                      {clips.length === 0 ? 'Drop to load clip' : 'Drop to add clip'}
+                    </span>
                   </div>
                 </div>
               )}

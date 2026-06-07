@@ -55,8 +55,6 @@ export function registerKeymap(deps: KeymapDeps): () => void {
       const p = getPlayer();
       const targetTime = (p && p.hoverTime !== null) ? p.hoverTime : store.currentTime;
       store.cutAtCursor(targetTime);
-      store.setCurrentTime(targetTime);
-      void p?.seekTo(targetTime);
     },
     trimLeft(e) {
       e.preventDefault();
@@ -64,8 +62,6 @@ export function registerKeymap(deps: KeymapDeps): () => void {
       const p = getPlayer();
       const targetTime = (p && p.hoverTime !== null) ? p.hoverTime : store.currentTime;
       store.trimLeft(targetTime);
-      store.setCurrentTime(targetTime);
-      void p?.seekTo(targetTime);
     },
     trimRight(e) {
       e.preventDefault();
@@ -73,8 +69,6 @@ export function registerKeymap(deps: KeymapDeps): () => void {
       const p = getPlayer();
       const targetTime = (p && p.hoverTime !== null) ? p.hoverTime : store.currentTime;
       store.trimRight(targetTime);
-      store.setCurrentTime(targetTime);
-      void p?.seekTo(targetTime);
     },
     deleteSelection(e) {
       e.preventDefault();

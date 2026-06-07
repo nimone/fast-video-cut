@@ -1,70 +1,101 @@
 // src/components/info/shortcut-help.tsx
 // Keyboard shortcut cheatsheet + remapping UI.
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { RotateCcw, Keyboard, AlertCircle } from 'lucide-react';
+import { Button } from "@/components/ui/button";
 import {
-  useKeymapStore,
+  Dialog,
+  DialogFooter,
+  DialogHeader,
+  DialogPanel,
+  DialogPopup,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Kbd, KbdGroup } from "@/components/ui/kbd";
+import { AlertCircle, Keyboard, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
   ACTION_LABELS,
   DEFAULT_BINDINGS,
+  useKeymapStore,
   type ActionName,
-} from '../../store/keymap-store';
-import {
-  Dialog, DialogPopup, DialogHeader, DialogTitle, DialogPanel, DialogFooter,
-} from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Kbd } from '@/components/ui/kbd';
+} from "../../store/keymap-store";
 
 /* ── Key display helper ───────────────────────────────────────────── */
 
 function formatKey(key: string): string {
   return key
-    .replace('$mod', '⌘/Ctrl')
-    .replace('Shift+/', '?')
-    .replace('ArrowLeft', '←')
-    .replace('ArrowRight', '→')
-    .replace('ArrowUp', '↑')
-    .replace('ArrowDown', '↓')
-    .replace('Space', 'Space')
-    .replace('Delete', 'Del');
+    .replace("$mod", "⌘")
+    .replace("Shift+/", "?")
+    .replace("Shift", "⇧")
+    .replace("ArrowLeft", "←")
+    .replace("ArrowRight", "→")
+    .replace("ArrowUp", "↑")
+    .replace("ArrowDown", "↓")
+    .replace("Space", "Space")
+    .replace("Delete", "Del");
+}
+
+function splitBinding(formatted: string): string[] {
+  if (formatted === "+") return ["+"];
+  if (formatted.endsWith("++")) {
+    return [...formatted.slice(0, -2).split("+"), "+"];
+  }
+  return formatted.split("+");
 }
 
 /** Convert a raw KeyboardEvent into a tinykeys-compatible binding string. */
 function eventToBinding(e: KeyboardEvent): string | null {
-  const ignore = ['Control', 'Shift', 'Alt', 'Meta', 'CapsLock', 'Tab', 'Escape'];
+  const ignore = ["Control", "Shift", "Alt", "Meta", "CapsLock", "Tab", "Escape"];
   if (ignore.includes(e.key)) return null;
 
   const parts: string[] = [];
-  if (e.metaKey || e.ctrlKey) parts.push('$mod');
-  if (e.altKey) parts.push('Alt');
-  if (e.shiftKey) parts.push('Shift');
+  if (e.metaKey || e.ctrlKey) parts.push("$mod");
+  if (e.altKey) parts.push("Alt");
+  if (e.shiftKey) parts.push("Shift");
 
   // Normalise the key
   let k = e.key;
-  if (k === ' ') k = 'Space';
+  if (k === " ") k = "Space";
 
   parts.push(k);
-  return parts.join('+');
+  return parts.join("+");
 }
 
 /* ── Sections ─────────────────────────────────────────────────────── */
 
 const SECTIONS: Array<{ title: string; actions: ActionName[] }> = [
   {
-    title: 'Playback',
-    actions: ['playPause', 'frameStepBack', 'frameStepForward', 'bigJumpBack', 'bigJumpForward', 'speedDown', 'speedUp'],
+    title: "Playback",
+    actions: [
+      "playPause",
+      "frameStepBack",
+      "frameStepForward",
+      "bigJumpBack",
+      "bigJumpForward",
+      "speedDown",
+      "speedUp",
+    ],
   },
   {
-    title: 'Editing',
-    actions: ['cutAtCursor', 'trimLeft', 'trimRight', 'deleteSelection', 'moveSegmentLeft', 'moveSegmentRight', 'undo', 'redo'],
+    title: "Editing",
+    actions: [
+      "cutAtCursor",
+      "trimLeft",
+      "trimRight",
+      "deleteSelection",
+      "moveSegmentLeft",
+      "moveSegmentRight",
+      "undo",
+      "redo",
+    ],
   },
   {
-    title: 'Navigation',
-    actions: ['prevCut', 'nextCut', 'zoomIn', 'zoomOut'],
+    title: "Navigation",
+    actions: ["prevCut", "nextCut", "zoomIn", "zoomOut"],
   },
   {
-    title: 'File',
-    actions: ['openFile', 'export', 'showCheatsheet'],
+    title: "File",
+    actions: ["openFile", "export", "showCheatsheet"],
   },
 ];
 
@@ -98,22 +129,27 @@ function ShortcutRow({
     const handler = (e: KeyboardEvent) => {
       e.preventDefault();
       e.stopPropagation();
-      if (e.key === 'Escape') { onCancelCapture(); return; }
+      if (e.key === "Escape") {
+        onCancelCapture();
+        return;
+      }
       const b = eventToBinding(e);
       if (b) onCapture(action, b);
     };
 
-    window.addEventListener('keydown', handler, true);
-    return () => window.removeEventListener('keydown', handler, true);
+    window.addEventListener("keydown", handler, true);
+    return () => window.removeEventListener("keydown", handler, true);
   }, [capturing, action, onCapture, onCancelCapture]);
 
   return (
-    <div className={`flex items-center justify-between gap-3 py-1.5 px-2 rounded-lg transition-colors ${isConflict ? 'bg-destructive/8' : 'hover:bg-muted/40'}`}>
+    <div
+      className={`flex items-center justify-between gap-3 py-1.5 px-2 rounded-lg transition-colors ${isConflict ? "bg-destructive/8" : "hover:bg-muted/40"}`}
+    >
       <div className="flex items-center gap-2 min-w-0">
         {isConflict && <AlertCircle className="size-3 text-destructive flex-shrink-0" />}
         <span className="text-xs text-foreground/75 truncate">{ACTION_LABELS[action]}</span>
       </div>
-      <div className="flex items-center gap-1.5 flex-shrink-0">
+      <div className="flex items-center gap-1.5 shrink-0">
         {/* Reset to default */}
         {!isDefault && (
           <button
@@ -139,16 +175,22 @@ function ShortcutRow({
             onClick={onStartCapture}
             title="Click to remap"
             className={`group/kbd relative cursor-pointer rounded transition-opacity ${
-              isConflict ? 'opacity-70 hover:opacity-100' : 'hover:opacity-80'
+              isConflict ? "opacity-70 hover:opacity-100" : "hover:opacity-80"
             }`}
           >
-            <Kbd
-              className={`font-mono text-[10px] pointer-events-none ${
-                isConflict ? 'bg-destructive/15 text-destructive/80 border border-destructive/30' : ''
-              }`}
-            >
-              {formatKey(binding)}
-            </Kbd>
+            <KbdGroup>
+              {splitBinding(formatKey(binding)).map((part) => (
+                <Kbd
+                  className={`font-mono pointer-events-none ${
+                    isConflict
+                      ? "bg-destructive/15 text-destructive/80 border border-destructive/30"
+                      : ""
+                  }`}
+                >
+                  {part}
+                </Kbd>
+              ))}
+            </KbdGroup>
           </button>
         )}
       </div>
@@ -189,13 +231,24 @@ export function ShortcutHelp({ open, onClose }: ShortcutHelpProps) {
 
   const conflictSet = conflicts();
 
-  const handleCapture = useCallback((action: ActionName, key: string) => {
-    setBinding(action, key);
-    setCapturingAction(null);
-  }, [setBinding]);
+  const handleCapture = useCallback(
+    (action: ActionName, key: string) => {
+      setBinding(action, key);
+      setCapturingAction(null);
+    },
+    [setBinding],
+  );
 
   return (
-    <Dialog open={open} onOpenChange={(o) => { if (!o) { setCapturingAction(null); onClose(); } }}>
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o) {
+          setCapturingAction(null);
+          onClose();
+        }
+      }}
+    >
       <DialogPopup className="max-w-2xl" showCloseButton>
         <DialogHeader>
           <div className="flex items-center gap-3">
@@ -204,7 +257,9 @@ export function ShortcutHelp({ open, onClose }: ShortcutHelpProps) {
             </div>
             <div>
               <DialogTitle>Keyboard Shortcuts</DialogTitle>
-              <p className="text-xs text-muted-foreground mt-0.5">Click any shortcut to remap it. Press Escape to cancel.</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Click any shortcut to remap it. Press Escape to cancel.
+              </p>
             </div>
           </div>
         </DialogHeader>
@@ -249,13 +304,23 @@ export function ShortcutHelp({ open, onClose }: ShortcutHelpProps) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => { resetAll(); setCapturingAction(null); }}
+            onClick={() => {
+              resetAll();
+              setCapturingAction(null);
+            }}
             className="mr-auto"
           >
             <RotateCcw className="size-3.5" />
             Reset all to defaults
           </Button>
-          <Button variant="default" size="sm" onClick={() => { setCapturingAction(null); onClose(); }}>
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => {
+              setCapturingAction(null);
+              onClose();
+            }}
+          >
             Done
           </Button>
         </DialogFooter>

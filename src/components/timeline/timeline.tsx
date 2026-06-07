@@ -150,17 +150,22 @@ export function Timeline({ player, className = '' }: TimelineProps) {
     selectedSegmentIndex, viewStart, viewEnd, totalDuration,
   ]);
 
+  const drawRef = useRef(draw);
+  useEffect(() => {
+    drawRef.current = draw;
+  }, [draw]);
+
   // rAF render loop
   useEffect(() => {
     const loop = () => {
-      draw();
+      drawRef.current();
       rafRef.current = requestAnimationFrame(loop);
     };
     rafRef.current = requestAnimationFrame(loop);
     return () => {
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
-  }, [draw]);
+  }, []);
 
   // Throttled seek
   const throttledSeek = useCallback((time: number) => {

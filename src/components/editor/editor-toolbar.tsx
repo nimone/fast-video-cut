@@ -8,6 +8,7 @@ import {
   Slash,
 } from "lucide-react";
 import { useEditStore } from "../../store/edit-store";
+import { useShallow } from "zustand/react/shallow";
 
 export function EditorToolbar() {
   const {
@@ -21,7 +22,20 @@ export function EditorToolbar() {
     trimRight,
     deleteSelection,
     selectionStart,
-  } = useEditStore();
+  } = useEditStore(
+    useShallow((s) => ({
+      file: s.file,
+      canUndo: s.canUndo,
+      canRedo: s.canRedo,
+      undo: s.undo,
+      redo: s.redo,
+      cutAtCursor: s.cutAtCursor,
+      trimLeft: s.trimLeft,
+      trimRight: s.trimRight,
+      deleteSelection: s.deleteSelection,
+      selectionStart: s.selectionStart,
+    })),
+  );
 
   return (
     <div className="flex items-center gap-1 px-3 h-9 shrink-0 border-t border-border bg-card/60">

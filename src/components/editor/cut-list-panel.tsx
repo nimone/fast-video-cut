@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { Player } from "../../media/player";
 import { useEditStore } from "../../store/edit-store";
+import { useShallow } from "zustand/react/shallow";
 
 interface CutListPanelProps {
   player: Player | null;
@@ -32,7 +33,17 @@ export function CutListPanel({ player }: CutListPanelProps) {
     moveSegment,
     setCurrentTime,
     duration,
-  } = useEditStore();
+  } = useEditStore(
+    useShallow((s) => ({
+      segments: s.segments,
+      selectedSegmentIndex: s.selectedSegmentIndex,
+      setSelectedSegmentIndex: s.setSelectedSegmentIndex,
+      deleteSegmentByIndex: s.deleteSegmentByIndex,
+      moveSegment: s.moveSegment,
+      setCurrentTime: s.setCurrentTime,
+      duration: s.duration,
+    })),
+  );
 
   const totalKept = segments.reduce((acc, s) => acc + (s.end - s.start), 0);
   const totalRemoved = duration - totalKept;

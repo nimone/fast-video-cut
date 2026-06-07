@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import {
   AlertTriangle,
+  ArrowLeft,
   Download,
   Film,
   HelpCircle,
@@ -34,6 +35,7 @@ import { useKeymapStore } from "./store/keymap-store";
 import type { ProjectStore } from "./store/project-store";
 import { useProjectStore } from "./store/project-store";
 import { saveFileToOPFS, loadFileFromOPFS } from "./lib/opfs";
+import { useShallow } from "zustand/react/shallow";
 
 function formatDuration(s: number): string {
   const m = Math.floor(s / 60);
@@ -105,45 +107,61 @@ function Editor({
   const playerRef = useRef<Player | null>(null);
 
   const { file, duration, segments, keyframeTimes, fps, clips, activeClipId, initFile, appendClip } =
-    useEditStore();
+    useEditStore(
+      useShallow((s) => ({
+        file: s.file,
+        duration: s.duration,
+        segments: s.segments,
+        keyframeTimes: s.keyframeTimes,
+        fps: s.fps,
+        clips: s.clips,
+        activeClipId: s.activeClipId,
+        initFile: s.initFile,
+        appendClip: s.appendClip,
+      })),
+    );
 
   // Auto-save edit state and media items to project store
   useEffect(() => {
     if (!projectId || loading) return;
 
-    const savedClips = clips.map((clip) => ({
-      id: clip.id,
-      fileName: clip.file.name,
-      fileSize: clip.file.size,
-      fileType: clip.file.type,
-      duration: clip.duration,
-      keyframeTimes: clip.keyframeTimes,
-      fps: clip.fps,
-      segments: clip.segments,
-      history: clip.history,
-      historyIndex: clip.historyIndex,
-      color: clip.color,
-    }));
+    const handler = setTimeout(() => {
+      const savedClips = clips.map((clip) => ({
+        id: clip.id,
+        fileName: clip.file.name,
+        fileSize: clip.file.size,
+        fileType: clip.file.type,
+        duration: clip.duration,
+        keyframeTimes: clip.keyframeTimes,
+        fps: clip.fps,
+        segments: clip.segments,
+        history: clip.history,
+        historyIndex: clip.historyIndex,
+        color: clip.color,
+      }));
 
-    const savedMediaItems = mediaItems.map((item) => ({
-      id: item.id,
-      name: item.name,
-      size: item.file.size,
-      type: item.file.type,
-      duration: item.duration,
-    }));
+      const savedMediaItems = mediaItems.map((item) => ({
+        id: item.id,
+        name: item.name,
+        size: item.file.size,
+        type: item.file.type,
+        duration: item.duration,
+      }));
 
-    saveProjectState(projectId, {
-      segments,
-      duration,
-      keyframeTimes,
-      fps,
-      segmentCount: segments.length,
-      mediaFileNames: file ? [file.name] : clips.map((c) => c.file.name),
-      clips: savedClips,
-      activeClipId,
-      mediaItems: savedMediaItems,
-    });
+      saveProjectState(projectId, {
+        segments,
+        duration,
+        keyframeTimes,
+        fps,
+        segmentCount: segments.length,
+        mediaFileNames: file ? [file.name] : clips.map((c) => c.file.name),
+        clips: savedClips,
+        activeClipId,
+        mediaItems: savedMediaItems,
+      });
+    }, 1000);
+
+    return () => clearTimeout(handler);
   }, [
     projectId,
     clips,
@@ -269,7 +287,8 @@ function Editor({
 
   // Recreate player when active clip's file changes (switching active clip or loading)
   useEffect(() => {
-    if (!file) {
+    const activeFile = file;
+    if (!activeFile) {
       if (playerRef.current) {
         playerRef.current.dispose();
         playerRef.current = null;
@@ -279,12 +298,20 @@ function Editor({
       return;
     }
 
-    if (loadedFileRef.current === file) {
-      return; // Already loaded/loading this exact file object reference
+    if (
+      loadedFileRef.current &&
+      loadedFileRef.current.name === activeFile.name &&
+      loadedFileRef.current.size === activeFile.size
+    ) {
+      // Same file contents (possibly different restored File object instances).
+      // Update the reference but do not recreate the player.
+      loadedFileRef.current = activeFile;
+      return;
     }
 
     let active = true;
     async function switchPlayer() {
+      if (!activeFile) return;
       setLoading(true);
       setLoadError(null);
 
@@ -294,9 +321,14 @@ function Editor({
         setPlayer(null);
       }
 
+      let inputToDispose: any = null;
       try {
-        const probe = await probeFile(file);
-        if (!active) return;
+        const probe = await probeFile(activeFile);
+        if (!active) {
+          probe.input.dispose();
+          return;
+        }
+        inputToDispose = probe.input;
 
         // Compute keyframe interval
         const kfTimes = probe.keyframeTimes;
@@ -321,12 +353,16 @@ function Editor({
         if (!videoTrack) throw new Error("No video track found.");
 
         const p = new Player(input, videoTrack, audioTrack, probe.duration);
+        inputToDispose = null; // Player now owns the input and will dispose it
         playerRef.current = p;
         setPlayer(p);
-        loadedFileRef.current = file;
+        loadedFileRef.current = activeFile;
 
         await p.seekTo(0);
       } catch (err: unknown) {
+        if (inputToDispose) {
+          inputToDispose.dispose();
+        }
         if (active) {
           const msg = err instanceof Error ? err.message : String(err);
           setLoadError(`Failed to load video: ${msg}`);
@@ -364,12 +400,16 @@ function Editor({
       setLoadError(null);
       try {
         const probe = await probeFile(f);
-        initFile(f, probe.duration, probe.keyframeTimes, probe.fps);
-        if (projectId) {
-          const newActiveClipId = useEditStore.getState().activeClipId;
-          if (newActiveClipId) {
-            await saveFileToOPFS(projectId, newActiveClipId, f);
+        try {
+          initFile(f, probe.duration, probe.keyframeTimes, probe.fps);
+          if (projectId) {
+            const newActiveClipId = useEditStore.getState().activeClipId;
+            if (newActiveClipId) {
+              await saveFileToOPFS(projectId, newActiveClipId, f);
+            }
           }
+        } finally {
+          probe.input.dispose();
         }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -387,9 +427,13 @@ function Editor({
       setLoadError(null);
       try {
         const probe = await probeFile(f);
-        const newClipId = appendClip(f, probe.duration, probe.keyframeTimes, probe.fps);
-        if (projectId) {
-          await saveFileToOPFS(projectId, newClipId, f);
+        try {
+          const newClipId = appendClip(f, probe.duration, probe.keyframeTimes, probe.fps);
+          if (projectId) {
+            await saveFileToOPFS(projectId, newClipId, f);
+          }
+        } finally {
+          probe.input.dispose();
         }
       } catch (e: unknown) {
         const msg = e instanceof Error ? e.message : String(e);
@@ -508,7 +552,7 @@ function Editor({
       {/* Top navbar */}
       <header className="flex items-center gap-3 px-4 h-12 bg-card border-b border-border shrink-0">
         {/* Back to projects */}
-        {/* <Button
+        <Button
           id="btn-back-to-projects"
           variant="ghost"
           size="icon-sm"
@@ -518,7 +562,7 @@ function Editor({
           <ArrowLeft />
         </Button>
 
-        <div className="h-4 w-px bg-border" /> */}
+        <div className="h-4 w-px bg-border" />
 
         {/* Logo + project name */}
         <div className="flex items-center gap-2 mr-1">
@@ -600,120 +644,121 @@ function Editor({
       </header>
 
       {/* Main content — always show editor layout */}
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {loading ? (
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center">
-              <Spinner className="size-10 mx-auto mb-4 text-primary" />
-              <p className="text-sm text-muted-foreground">Loading video…</p>
-              <p className="text-xs text-muted-foreground/50 mt-1">Probing keyframes…</p>
-            </div>
-          </div>
-        ) : (
-          // Editor layout — column: top row (panels) + full-width timeline at bottom
-          <div className="flex-1 flex flex-col overflow-hidden">
-            {/* Top row: Media panel | Player | Cut list */}
-            <div className="flex flex-1 min-h-0 overflow-hidden">
-              {/* Left sidebar: Media panel (collapsible) */}
-              <div
-                className="shrink-0 flex border-r border-border bg-card/50 overflow-hidden transition-[width] duration-200 ease-in-out relative"
-                style={{ width: mediaPanelOpen ? "13rem" : "0px" }}
-              >
-                <div className="w-52 shrink-0 h-full">
-                  <MediaPanel
-                    items={mediaItems}
-                    onAddFiles={addMediaFiles}
-                    onRemoveItem={removeMediaItem}
-                    onDragStart={setDraggingClipId}
-                    activeItemId={draggingClipId}
-                  />
-                </div>
-              </div>
-
-              {/* Center: Player (with panel toggle buttons) */}
-              <div className="flex-1 min-w-0 p-3 relative">
-                {/* Left panel toggle */}
-                <button
-                  id="btn-toggle-media-panel"
-                  onClick={() => setMediaPanelOpen((v) => !v)}
-                  title={mediaPanelOpen ? "Collapse media panel" : "Expand media panel"}
-                  className="absolute left-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-4 h-10 rounded-r-md bg-card border border-l-0 border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150 cursor-pointer"
-                >
-                  {mediaPanelOpen ? (
-                    <PanelLeftClose className="size-3" />
-                  ) : (
-                    <PanelLeftOpen className="size-3" />
-                  )}
-                </button>
-
-                {/* Right panel toggle */}
-                <button
-                  id="btn-toggle-cut-list"
-                  onClick={() => setCutListOpen((v) => !v)}
-                  title={cutListOpen ? "Collapse cut list" : "Expand cut list"}
-                  className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-4 h-10 rounded-l-md bg-card border border-r-0 border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150 cursor-pointer"
-                >
-                  {cutListOpen ? (
-                    <PanelRightClose className="size-3" />
-                  ) : (
-                    <PanelRightOpen className="size-3" />
-                  )}
-                </button>
-
-                {/* Error banner when file fails to load */}
-                {loadError && !file && (
-                  <div className="absolute top-3 left-6 right-6 z-10 p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive-foreground text-xs flex items-center gap-2">
-                    <AlertTriangle className="size-3.5 shrink-0" />
-                    <span className="font-semibold">Error loading file:</span> {loadError}
-                  </div>
-                )}
-
-                <PlayerPanel player={player} />
-              </div>
-
-              {/* Right: Cut list (collapsible) */}
-              <div
-                className="shrink-0 flex border-l border-border overflow-hidden transition-[width] duration-200 ease-in-out"
-                style={{ width: cutListOpen ? "16rem" : "0px" }}
-              >
-                <div className="w-64 shrink-0 h-full">
-                  <CutListPanel player={player} />
-                </div>
-              </div>
-            </div>
-
-            {/* Toolbar above timeline */}
-            <EditorToolbar />
-
-            {/* Full-width Timeline */}
+      <main className="flex-1 flex flex-col overflow-hidden relative">
+        {/* Editor layout — column: top row (panels) + full-width timeline at bottom */}
+        <div className="flex-1 flex flex-col overflow-hidden">
+          {/* Top row: Media panel | Player | Cut list */}
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            {/* Left sidebar: Media panel (collapsible) */}
             <div
-              id="timeline-container"
-              className={`h-32 shrink-0 border-t transition-all duration-150 relative ${
-                isTimelineDragOver
-                  ? "border-primary shadow-[0_-2px_12px_0] shadow-primary/20"
-                  : "border-border"
-              }`}
-              onDrop={handleTimelineDrop}
-              onDragOver={handleTimelineDragOver}
-              onDragLeave={handleTimelineDragLeave}
-              onDragEnd={() => {
-                setDraggingClipId(null);
-                setIsTimelineDragOver(false);
-              }}
+              className="shrink-0 flex border-r border-border bg-card/50 overflow-hidden transition-[width] duration-200 ease-in-out relative"
+              style={{ width: mediaPanelOpen ? "13rem" : "0px" }}
             >
-              <Timeline player={player} className="h-full" />
+              <div className="w-52 shrink-0 h-full">
+                <MediaPanel
+                  items={mediaItems}
+                  onAddFiles={addMediaFiles}
+                  onRemoveItem={removeMediaItem}
+                  onDragStart={setDraggingClipId}
+                  activeItemId={draggingClipId}
+                />
+              </div>
+            </div>
 
-              {/* Drop overlay */}
-              {isTimelineDragOver && (
-                <div className="absolute inset-0 bg-primary/10 backdrop-blur-[1px] flex items-center justify-center pointer-events-none z-10">
-                  <div className="flex items-center gap-2 bg-card/90 border border-primary/40 rounded-lg px-4 py-2 shadow-lg">
-                    <Film className="size-4 text-primary" />
-                    <span className="text-sm font-semibold text-foreground">
-                      {clips.length === 0 ? "Drop to load clip" : "Drop to add clip"}
-                    </span>
-                  </div>
+            {/* Center: Player (with panel toggle buttons) */}
+            <div className="flex-1 min-w-0 p-3 relative">
+              {/* Left panel toggle */}
+              <button
+                id="btn-toggle-media-panel"
+                onClick={() => setMediaPanelOpen((v) => !v)}
+                title={mediaPanelOpen ? "Collapse media panel" : "Expand media panel"}
+                className="absolute left-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-4 h-10 rounded-r-md bg-card border border-l-0 border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150 cursor-pointer"
+              >
+                {mediaPanelOpen ? (
+                  <PanelLeftClose className="size-3" />
+                ) : (
+                  <PanelLeftOpen className="size-3" />
+                )}
+              </button>
+
+              {/* Right panel toggle */}
+              <button
+                id="btn-toggle-cut-list"
+                onClick={() => setCutListOpen((v) => !v)}
+                title={cutListOpen ? "Collapse cut list" : "Expand cut list"}
+                className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-4 h-10 rounded-l-md bg-card border border-r-0 border-border text-muted-foreground hover:text-foreground hover:bg-accent transition-all duration-150 cursor-pointer"
+              >
+                {cutListOpen ? (
+                  <PanelRightClose className="size-3" />
+                ) : (
+                  <PanelRightOpen className="size-3" />
+                )}
+              </button>
+
+              {/* Error banner when file fails to load */}
+              {loadError && !file && (
+                <div className="absolute top-3 left-6 right-6 z-10 p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive-foreground text-xs flex items-center gap-2">
+                  <AlertTriangle className="size-3.5 shrink-0" />
+                  <span className="font-semibold">Error loading file:</span> {loadError}
                 </div>
               )}
+
+              <PlayerPanel player={player} />
+            </div>
+
+            {/* Right: Cut list (collapsible) */}
+            <div
+              className="shrink-0 flex border-l border-border overflow-hidden transition-[width] duration-200 ease-in-out"
+              style={{ width: cutListOpen ? "16rem" : "0px" }}
+            >
+              <div className="w-64 shrink-0 h-full">
+                <CutListPanel player={player} />
+              </div>
+            </div>
+          </div>
+
+          {/* Toolbar above timeline */}
+          <EditorToolbar />
+
+          {/* Full-width Timeline */}
+          <div
+            id="timeline-container"
+            className={`h-32 shrink-0 border-t transition-all duration-150 relative ${
+              isTimelineDragOver
+                ? "border-primary shadow-[0_-2px_12px_0] shadow-primary/20"
+                : "border-border"
+            }`}
+            onDrop={handleTimelineDrop}
+            onDragOver={handleTimelineDragOver}
+            onDragLeave={handleTimelineDragLeave}
+            onDragEnd={() => {
+              setDraggingClipId(null);
+              setIsTimelineDragOver(false);
+            }}
+          >
+            <Timeline player={player} className="h-full" />
+
+            {/* Drop overlay */}
+            {isTimelineDragOver && (
+              <div className="absolute inset-0 bg-primary/10 backdrop-blur-[1px] flex items-center justify-center pointer-events-none z-10">
+                <div className="flex items-center gap-2 bg-card/90 border border-primary/40 rounded-lg px-4 py-2 shadow-lg">
+                  <Film className="size-4 text-primary" />
+                  <span className="text-sm font-semibold text-foreground">
+                    {clips.length === 0 ? "Drop to load clip" : "Drop to add clip"}
+                  </span>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Semi-transparent Loading Overlay (non-unmounting and non-blocking) */}
+        {loading && (
+          <div className="absolute inset-0 bg-background/30 backdrop-blur-[1px] flex items-center justify-center z-50 pointer-events-none">
+            <div className="text-center bg-card/90 border border-border p-5 rounded-2xl shadow-xl backdrop-blur-md">
+              <Spinner className="size-8 mx-auto mb-3 text-primary animate-spin" />
+              <p className="text-sm text-foreground/80 font-medium">Loading video…</p>
+              <p className="text-xs text-muted-foreground/60 mt-0.5">Probing keyframes…</p>
             </div>
           </div>
         )}

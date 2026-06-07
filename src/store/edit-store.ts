@@ -466,8 +466,13 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
   },
 
   deleteSegmentByIndex(idx) {
-    const { segments, history, historyIndex, selectedSegmentIndex, clips, activeClipId } = get();
-    if (segments.length <= 1) return;
+    const { segments, history, historyIndex, selectedSegmentIndex, clips, activeClipId, removeClip } = get();
+    if (segments.length <= 1) {
+      if (activeClipId) {
+        removeClip(activeClipId);
+      }
+      return;
+    }
     const newSegments = segments.filter((_, i) => i !== idx);
     const h = pushHistory(history, historyIndex, newSegments);
 

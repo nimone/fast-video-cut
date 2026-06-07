@@ -348,81 +348,6 @@ function Editor({
 
         <div className="flex-1" />
 
-        {/* Edit actions */}
-        {file && (
-          <div className="flex items-center gap-1">
-            <Button
-              id="btn-cut"
-              variant="ghost"
-              size="sm"
-              onClick={() => cutAtCursor()}
-              title="Cut at cursor (S)"
-            >
-              <Scissors />
-              Cut
-            </Button>
-
-            <Button
-              id="btn-trim-left"
-              variant="ghost"
-              size="sm"
-              onClick={() => trimLeft()}
-              title="Trim left (A)"
-            >
-              <ChevronLeft />
-              Trim L
-            </Button>
-
-            <Button
-              id="btn-trim-right"
-              variant="ghost"
-              size="sm"
-              onClick={() => trimRight()}
-              title="Trim right (D)"
-            >
-              <ChevronRight />
-              Trim R
-            </Button>
-
-            {(selectionStart !== null) && (
-              <Button
-                id="btn-delete-selection"
-                variant="destructive-outline"
-                size="sm"
-                onClick={deleteSelection}
-                title="Delete selection (Del)"
-              >
-                <Slash />
-                Delete
-              </Button>
-            )}
-
-            <div className="h-4 w-px bg-border mx-1" />
-
-            <Button
-              id="btn-undo"
-              variant="ghost"
-              size="icon-sm"
-              onClick={undo}
-              disabled={!canUndo()}
-              title="Undo (Ctrl+Z)"
-            >
-              <RotateCcw />
-            </Button>
-
-            <Button
-              id="btn-redo"
-              variant="ghost"
-              size="icon-sm"
-              onClick={redo}
-              disabled={!canRedo()}
-              title="Redo (Ctrl+Shift+Z)"
-            >
-              <RotateCw />
-            </Button>
-          </div>
-        )}
-
         <div className="h-4 w-px bg-border mx-1" />
 
         {/* Help */}
@@ -452,63 +377,9 @@ function Editor({
         )}
       </header>
 
-      {/* Main content */}
+      {/* Main content — always show editor layout */}
       <main className="flex-1 flex flex-col overflow-hidden">
-        {!file && !loading ? (
-          // Drop zone / welcome
-          <div className="flex-1 flex items-center justify-center">
-            <div className="text-center max-w-sm">
-              <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/20 flex items-center justify-center mx-auto mb-6">
-                <Film className="text-primary size-9" />
-              </div>
-              <h1 className="text-2xl font-bold mb-2 text-foreground">
-                Video<span className="text-primary">Cut</span>
-              </h1>
-              <p className="text-sm text-muted-foreground mb-6">
-                Fast, keyboard-driven lossless trimmer.
-                <br />
-                No re-encoding. Snaps to keyframes.
-              </p>
-
-              {loadError && (
-                <div className="mb-4 p-3 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive-foreground text-xs text-left">
-                  <div className="flex items-center gap-2 mb-1">
-                    <AlertTriangle className="size-3.5" />
-                    <strong>Error loading file</strong>
-                  </div>
-                  {loadError}
-                </div>
-              )}
-
-              <Button
-                id="btn-open-file-welcome"
-                variant="default"
-                size="lg"
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full justify-center mb-3 shadow-lg shadow-primary/20"
-              >
-                <FolderOpen />
-                Open Video File
-              </Button>
-
-              <p className="text-xs text-muted-foreground/50">
-                or drag & drop a video file here
-              </p>
-
-              <div className="mt-6 grid grid-cols-3 gap-2">
-                {['MKV', 'MP4', 'WebM', 'MOV', '60fps', 'H.264'].map((tag) => (
-                  <Badge
-                    key={tag}
-                    variant="outline"
-                    className="justify-center py-1"
-                  >
-                    {tag}
-                  </Badge>
-                ))}
-              </div>
-            </div>
-          </div>
-        ) : loading ? (
+        {loading ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
               <Spinner className="size-10 mx-auto mb-4 text-primary" />
@@ -564,6 +435,14 @@ function Editor({
                     : <PanelRightOpen className="size-3" />}
                 </button>
 
+                {/* Error banner when file fails to load */}
+                {loadError && !file && (
+                  <div className="absolute top-3 left-6 right-6 z-10 p-2.5 rounded-xl bg-destructive/10 border border-destructive/20 text-destructive-foreground text-xs flex items-center gap-2">
+                    <AlertTriangle className="size-3.5 flex-shrink-0" />
+                    <span className="font-semibold">Error loading file:</span> {loadError}
+                  </div>
+                )}
+
                 <PlayerPanel player={player} />
               </div>
 
@@ -576,6 +455,82 @@ function Editor({
                   <CutListPanel player={player} />
                 </div>
               </div>
+            </div>
+
+            {/* Toolbar above timeline */}
+            <div className="flex items-center gap-1 px-3 h-9 flex-shrink-0 border-t border-border bg-card/60">
+              <Button
+                id="btn-cut"
+                variant="ghost"
+                size="sm"
+                onClick={() => cutAtCursor()}
+                disabled={!file}
+                title="Cut at cursor (S)"
+              >
+                <Scissors />
+                Cut
+              </Button>
+
+              <Button
+                id="btn-trim-left"
+                variant="ghost"
+                size="sm"
+                onClick={() => trimLeft()}
+                disabled={!file}
+                title="Trim left (A)"
+              >
+                <ChevronLeft />
+                Trim L
+              </Button>
+
+              <Button
+                id="btn-trim-right"
+                variant="ghost"
+                size="sm"
+                onClick={() => trimRight()}
+                disabled={!file}
+                title="Trim right (D)"
+              >
+                <ChevronRight />
+                Trim R
+              </Button>
+
+              {selectionStart !== null && (
+                <Button
+                  id="btn-delete-selection"
+                  variant="destructive-outline"
+                  size="sm"
+                  onClick={deleteSelection}
+                  title="Delete selection (Del)"
+                >
+                  <Slash />
+                  Delete
+                </Button>
+              )}
+
+              <div className="h-4 w-px bg-border mx-1" />
+
+              <Button
+                id="btn-undo"
+                variant="ghost"
+                size="icon-sm"
+                onClick={undo}
+                disabled={!canUndo()}
+                title="Undo (Ctrl+Z)"
+              >
+                <RotateCcw />
+              </Button>
+
+              <Button
+                id="btn-redo"
+                variant="ghost"
+                size="icon-sm"
+                onClick={redo}
+                disabled={!canRedo()}
+                title="Redo (Ctrl+Shift+Z)"
+              >
+                <RotateCw />
+              </Button>
             </div>
 
             {/* Full-width Timeline */}

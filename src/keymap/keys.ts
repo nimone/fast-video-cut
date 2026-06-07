@@ -8,6 +8,14 @@ import { useKeymapStore } from '../store/keymap-store';
 
 const SPEED_CYCLE = [0.25, 0.5, 1, 1.5, 2];
 
+/** Returns true when keyboard focus is inside a text input / dialog close button — shortcuts should be suppressed. */
+function isFocusedOnInput(): boolean {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName.toLowerCase();
+  return tag === 'input' || tag === 'textarea' || (el as HTMLElement).isContentEditable;
+}
+
 interface KeymapDeps {
   getEditStore: () => ReturnType<typeof useEditStore.getState>;
   getKeymapStore: () => ReturnType<typeof useKeymapStore.getState>;
@@ -178,10 +186,12 @@ export function registerKeymap(deps: KeymapDeps): () => void {
       openExport();
     },
     openFile(e) {
+      if (isFocusedOnInput()) return;
       e.preventDefault();
       openFile();
     },
     showCheatsheet(e) {
+      if (isFocusedOnInput()) return;
       e.preventDefault();
       toggleCheatsheet();
     },

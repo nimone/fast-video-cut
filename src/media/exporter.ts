@@ -116,6 +116,15 @@ export async function exportSegments(
   let processedDuration = 0;
   let videoTimestampOffset = 0;
   let audioTimestampOffset = 0;
+  // Track the actual last output timestamp so the next segment starts cleanly
+  let lastVideoTimestamp = 0;
+  let lastVideoDuration = 0;  // duration of the last video packet (for the gap)
+  let lastAudioTimestamp = 0;
+  let lastAudioDuration = 0;
+
+  // Round to microsecond precision to eliminate IEEE 754 sub-microsecond drift
+  // that causes "timestamp cannot be smaller than previous GOP" errors.
+  const roundTs = (t: number) => Math.round(t * 1_000_000) / 1_000_000;
 
   const videoPacketSink = new EncodedPacketSink(videoTrack);
   const audioPacketSink = audioTrack ? new EncodedPacketSink(audioTrack) : null;
@@ -143,8 +152,12 @@ export async function exportSegments(
 
       // Remap timestamp to be contiguous with previous segments
       const relativeTs = vPkt.timestamp - segVideoFirstTimestamp;
-      const offsetTs = relativeTs + videoTimestampOffset;
+      const offsetTs = roundTs(relativeTs + videoTimestampOffset);
       const adjustedPkt = vPkt.clone({ timestamp: offsetTs });
+
+      // Track real last output timestamp + packet duration for offset calc
+      lastVideoTimestamp = offsetTs;
+      lastVideoDuration = vPkt.duration ?? 0;
 
       if (isFirstVideoPacket) {
         // Must provide decoderConfig with first packet
@@ -159,7 +172,9 @@ export async function exportSegments(
       vPkt = await videoPacketSink.getNextPacket(vPkt);
     }
 
-    videoTimestampOffset += segDuration;
+    // Advance offset by the *actual* span of packets written, not the nominal segDuration.
+    // This prevents GOP timestamp errors when the keyframe snaps before seg.start.
+    videoTimestampOffset = lastVideoTimestamp + lastVideoDuration;
 
     // ---- AUDIO PACKETS ----
     if (audioPacketSink && audioSource && audioTrack && audioDecoderConfig) {
@@ -177,8 +192,12 @@ export async function exportSegments(
         }
 
         const relativeTs = aPkt.timestamp - segAudioFirstTimestamp;
-        const offsetTs = relativeTs + audioTimestampOffset;
+        const offsetTs = roundTs(relativeTs + audioTimestampOffset);
         const adjustedPkt = aPkt.clone({ timestamp: offsetTs });
+
+        // Track real last output timestamp
+        lastAudioTimestamp = offsetTs;
+        lastAudioDuration = aPkt.duration ?? 0;
 
         if (isFirstAudioPacket) {
           await audioSource.add(adjustedPkt, {
@@ -192,7 +211,7 @@ export async function exportSegments(
         aPkt = await audioPacketSink.getNextPacket(aPkt);
       }
 
-      audioTimestampOffset += segDuration;
+      audioTimestampOffset = lastAudioTimestamp + lastAudioDuration;
     }
 
     processedDuration += segDuration;

@@ -105,6 +105,7 @@ function Editor({
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const playerRef = useRef<Player | null>(null);
+  const autoPlayNextRef = useRef(false);
 
   const { file, duration, segments, keyframeTimes, fps, clips, activeClipId, initFile, appendClip } =
     useEditStore(
@@ -358,7 +359,19 @@ function Editor({
         setPlayer(p);
         loadedFileRef.current = activeFile;
 
-        await p.seekTo(0);
+        const autoPlayTime = useEditStore.getState().autoPlayNextTime;
+        if (autoPlayTime !== null) {
+          useEditStore.setState({ autoPlayNextTime: null });
+          await p.seekTo(autoPlayTime);
+          void p.play(autoPlayTime);
+        } else if (autoPlayNextRef.current) {
+          autoPlayNextRef.current = false;
+          await p.seekTo(0);
+          void p.play();
+        } else {
+          const storeCurrentTime = useEditStore.getState().currentTime;
+          await p.seekTo(storeCurrentTime);
+        }
       } catch (err: unknown) {
         if (inputToDispose) {
           inputToDispose.dispose();
@@ -380,6 +393,20 @@ function Editor({
       active = false;
     };
   }, [file]);
+
+  // Listen to ended event for continuous playback
+  useEffect(() => {
+    if (!player) return;
+    const offEnded = player.on("ended", () => {
+      const { clips, activeClipId, setActiveClipId } = useEditStore.getState();
+      const idx = clips.findIndex((c) => c.id === activeClipId);
+      if (idx !== -1 && idx < clips.length - 1) {
+        autoPlayNextRef.current = true;
+        setActiveClipId(clips[idx + 1].id);
+      }
+    });
+    return offEnded;
+  }, [player]);
 
   // Register keyboard shortcuts
   useEffect(() => {

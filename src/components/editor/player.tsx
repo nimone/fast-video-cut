@@ -9,7 +9,6 @@ import { useEditStore } from '../../store/edit-store';
 import type { Player as PlayerEngine } from '../../media/player';
 import { Button } from '@/components/ui/button';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import { stToVt } from '../timeline/timeline-draw';
 
 interface PlayerProps {
   player: PlayerEngine | null;
@@ -28,7 +27,7 @@ export function PlayerPanel({ player }: PlayerProps) {
   const [playing, setPlaying] = useState(false);
   const [speed, setSpeed] = useState(1);
 
-  const { currentTime, duration, fps, setCurrentTime, segments } = useEditStore();
+  const { currentTime, duration, fps, setCurrentTime, clips, activeClipId } = useEditStore();
 
   // Render incoming frames to canvas
   useEffect(() => {
@@ -73,8 +72,35 @@ export function PlayerPanel({ player }: PlayerProps) {
     [player]
   );
 
-  const totalDuration = segments.reduce((acc, s) => acc + (s.end - s.start), 0) || duration;
-  const virtualCurrentTime = stToVt(currentTime, segments);
+  // Total virtual duration of all clips combined
+  const totalDuration = clips.reduce((acc, c) => {
+    const clipDur = c.segments.reduce((s, seg) => s + (seg.end - seg.start), 0);
+    return acc + clipDur;
+  }, 0) || duration;
+
+  // Global virtual current time
+  const virtualCurrentTime = (() => {
+    let vtOffset = 0;
+    for (const c of clips) {
+      const clipDur = c.segments.reduce((s, seg) => s + (seg.end - seg.start), 0);
+      if (c.id === activeClipId) {
+        let localVT = 0;
+        let accum = 0;
+        for (const seg of c.segments) {
+          if (currentTime >= seg.start && currentTime <= seg.end) {
+            localVT = accum + (currentTime - seg.start);
+            break;
+          }
+          accum += seg.end - seg.start;
+          localVT = accum;
+        }
+        return vtOffset + localVT;
+      }
+      vtOffset += clipDur;
+    }
+    return currentTime; // fallback
+  })();
+
   const progressFrac = totalDuration > 0 ? virtualCurrentTime / totalDuration : 0;
 
   return (

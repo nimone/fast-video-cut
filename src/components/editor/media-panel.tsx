@@ -6,6 +6,7 @@ import { Clock, Film, Plus, Upload, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "../ui/badge";
 import { saveFileToOPFS, deleteClipFromOPFS } from "../../lib/opfs";
+import { useEditStore } from "../../store/edit-store";
 
 export interface MediaItem {
   id: string;
@@ -84,11 +85,13 @@ function ClipCard({
   onRemove,
   onDragStart,
   isActive,
+  isInTimeline,
 }: {
   item: MediaItem;
   onRemove: () => void;
   onDragStart: () => void;
   isActive: boolean;
+  isInTimeline: boolean;
 }) {
   return (
     <div
@@ -122,6 +125,13 @@ function ClipCard({
         ) : (
           <div className="absolute inset-0 flex items-center justify-center">
             <Film className="size-6 text-muted-foreground/40" />
+          </div>
+        )}
+
+        {/* In Timeline indicator badge */}
+        {isInTimeline && (
+          <div className="absolute top-1 left-1 bg-emerald-600/90 text-white backdrop-blur-sm rounded px-1 py-0.5 flex items-center gap-1 shadow-sm text-[9px] font-semibold uppercase tracking-wider">
+            <span>In Timeline</span>
           </div>
         )}
 
@@ -171,6 +181,7 @@ export function MediaPanel({
   onDragStart,
   activeItemId,
 }: MediaPanelProps) {
+  const storeClips = useEditStore((state) => state.clips);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isPanelDragOver, setIsPanelDragOver] = useState(false);
   const dragCounterRef = useRef(0);
@@ -303,15 +314,21 @@ export function MediaPanel({
               </div>
             )}
 
-            {items.map((item) => (
-              <ClipCard
-                key={item.id}
-                item={item}
-                isActive={item.id === activeItemId}
-                onRemove={() => onRemoveItem(item.id)}
-                onDragStart={() => onDragStart(item.id)}
-              />
-            ))}
+            {items.map((item) => {
+              const isInTimeline = storeClips.some(
+                (c) => c.file.name === item.file.name && c.file.size === item.file.size
+              );
+              return (
+                <ClipCard
+                  key={item.id}
+                  item={item}
+                  isActive={item.id === activeItemId}
+                  isInTimeline={isInTimeline}
+                  onRemove={() => onRemoveItem(item.id)}
+                  onDragStart={() => onDragStart(item.id)}
+                />
+              );
+            })}
 
             {/* Add more button at bottom */}
             <button

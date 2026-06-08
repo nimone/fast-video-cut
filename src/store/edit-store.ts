@@ -30,6 +30,7 @@ interface EditStoreState {
   // ── Multi-clip track ──────────────────────────────────────────────
   clips: TrackClip[];
   activeClipId: string | null;
+  autoPlayNextTime: number | null;
 
   // ── Derived / active-clip mirrors (kept for backward compat) ──────
   file: File | null;
@@ -133,6 +134,7 @@ function nextColor(): string {
 export const useEditStore = create<EditStoreState>((set, get) => ({
   clips: [],
   activeClipId: null,
+  autoPlayNextTime: null,
 
   file: null,
   duration: 0,
@@ -167,6 +169,7 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
     set({
       clips: [clip],
       activeClipId: id,
+      autoPlayNextTime: null,
       ...derivedFromClip(clip),
       selectedSegmentIndex: null,
       currentTime: 0,
@@ -196,6 +199,7 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
     set({
       clips: newClips,
       activeClipId: id,
+      autoPlayNextTime: null,
       ...derivedFromClip(clip),
       selectedSegmentIndex: null,
       currentTime: 0,
@@ -213,6 +217,7 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
     if (!clip) return;
     set({
       activeClipId: id,
+      autoPlayNextTime: null,
       ...derivedFromClip(clip),
       selectedSegmentIndex: null,
       currentTime: 0,
@@ -259,6 +264,7 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
       set({
         clips,
         activeClipId: activeClip.id,
+        autoPlayNextTime: null,
         ...derivedFromClip(activeClip),
         selectedSegmentIndex: null,
         currentTime: 0,
@@ -276,6 +282,7 @@ export const useEditStore = create<EditStoreState>((set, get) => ({
     set({
       clips: [],
       activeClipId: null,
+      autoPlayNextTime: null,
       file: null,
       duration: 0,
       keyframeTimes: [],

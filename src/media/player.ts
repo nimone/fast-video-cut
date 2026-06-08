@@ -22,6 +22,7 @@ type PlayerEventMap = {
   timeupdate: (time: number) => void;
   statechange: (state: PlayerState) => void;
   frameReady: (canvas: HTMLCanvasElement | OffscreenCanvas) => void;
+  ended: () => void;
 };
 
 type PlayerEventKey = keyof PlayerEventMap;
@@ -54,6 +55,7 @@ export class Player {
     timeupdate: [],
     statechange: [],
     frameReady: [],
+    ended: [],
   };
 
   constructor(
@@ -248,6 +250,7 @@ export class Player {
             this._playing = false;
             this.emit('timeupdate', this._currentTime);
             this.emit('statechange', this.getState());
+            this.emit('ended');
             return;
           }
 
@@ -260,6 +263,7 @@ export class Player {
             this._playing = false;
             this.emit('timeupdate', this._currentTime);
             this.emit('statechange', this.getState());
+            this.emit('ended');
             return;
           }
 
@@ -294,6 +298,7 @@ export class Player {
               this._playing = false;
               this.emit('timeupdate', this._currentTime);
               this.emit('statechange', this.getState());
+              this.emit('ended');
               return;
             }
           }

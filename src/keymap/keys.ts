@@ -38,15 +38,16 @@ export function registerKeymap(deps: KeymapDeps): () => void {
   const actions: Record<string, (e: KeyboardEvent) => void> = {
     playPause(e) {
       e.preventDefault();
+      const store = getEditStore();
+      if (store.hoverClipId !== null && store.hoverClipId !== store.activeClipId) {
+        const targetTime = store.hoverTime ?? 0;
+        useEditStore.setState({ autoPlayNextTime: targetTime });
+        store.setActiveClipId(store.hoverClipId);
+        return;
+      }
       const p = getPlayer();
       if (!p) return;
-      const store = getEditStore();
-      // Only seek-to-cursor when the cursor is over the active clip.
-      // If it's over a different clip, p.hoverTime is that clip's source-time
-      // which is meaningless for the active player — so just play/pause in place.
-      const hoverIsOnActiveClip =
-        store.hoverClipId === null || store.hoverClipId === store.activeClipId;
-      if (!p.playing && p.hoverTime !== null && hoverIsOnActiveClip) {
+      if (!p.playing && p.hoverTime !== null) {
         store.setCurrentTime(p.hoverTime);
         void p.play(p.hoverTime);
       } else {

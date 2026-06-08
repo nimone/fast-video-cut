@@ -2,6 +2,7 @@
 // Landing screen — shows all projects + create/delete actions.
 
 import { useState, useRef, useEffect } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import {
   Plus, Folder, Scissors, Trash2, Clock, Film,
   MoreHorizontal, Edit2, FolderOpen, Clapperboard,
@@ -391,6 +392,7 @@ function NewProjectCard({ onClick }: { onClick: () => void }) {
 /* ── Main home screen ─────────────────────────────────────────────── */
 
 export function ProjectsHome() {
+  const navigate = useNavigate();
   const { projects, createProject, deleteProject, renameProject, openProject } =
     useProjectStore();
 
@@ -402,7 +404,8 @@ export function ProjectsHome() {
   const sorted = [...projects].sort((a, b) => b.updatedAt - a.updatedAt);
 
   const handleCreate = (name: string) => {
-    createProject(name); // also sets activeProjectId
+    const proj = createProject(name); // also sets activeProjectId
+    navigate({ to: '/editor/$projectId', params: { projectId: proj.id } });
   };
 
   return (
@@ -475,7 +478,10 @@ export function ProjectsHome() {
               <ProjectCard
                 key={p.id}
                 project={p}
-                onOpen={() => openProject(p.id)}
+                onOpen={() => {
+                  openProject(p.id);
+                  navigate({ to: '/editor/$projectId', params: { projectId: p.id } });
+                }}
                 onRename={() => setRenameTarget(p)}
                 onDelete={() => setDeleteTarget(p)}
               />

@@ -8,6 +8,9 @@
 
 Fast Video Cut is a desktop-class, client-side, zero-install **Non-Linear Video Editor (NLE)** built directly on modern Web APIs. Unlike traditional web-based video editors that rely on heavy cloud transcoding servers or sluggish CPU-bound WebAssembly decoders, Fast Video Cut uses **hardware-accelerated WebCodecs** for real-time decoding on the GPU and performs **lossless stream copying** for instant exports with zero quality degradation.
 
+<img width="1920" height="966" alt="image" src="https://github.com/user-attachments/assets/121893c0-f422-4bb0-8b62-341811997710" />
+
+
 ---
 
 ## 🏗️ Architectural Overview
